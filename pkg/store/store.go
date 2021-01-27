@@ -11,6 +11,7 @@ var (
 	binaryName = "cf-argo"
 	version    = "v99.99.99"
 	gitCommit  = ""
+	baseGitURL = "https://github.com/noam-codefresh/argocd-production"
 )
 
 type Version struct {
@@ -23,13 +24,18 @@ type Version struct {
 type Store struct {
 	BinaryName string
 	Version    Version
+	BaseGitURL string
 }
 
+// Get returns the global store
 func Get() *Store {
 	return &s
 }
 
 func init() {
+	s.BinaryName = binaryName
+	s.BaseGitURL = baseGitURL
+
 	initVersion()
 }
 

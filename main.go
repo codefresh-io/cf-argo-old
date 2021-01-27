@@ -7,13 +7,26 @@ import (
 	"syscall"
 
 	"github.com/codefresh-io/cf-argo/cmd/root"
+	"github.com/codefresh-io/cf-argo/pkg/log"
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 )
 
 func main() {
 	ctx := context.Background()
 	ctx = contextWithCancel(ctx)
 
+	logrusLogger := logrus.StandardLogger()
+	ctx = log.WithLogger(ctx, log.FromLogrus(logrus.NewEntry(logrusLogger)))
+
+	logCfg := &log.Config{}
+
 	c := root.New(ctx)
+	c.PersistentFlags().AddFlagSet(logCfg.FlagSet())
+	c.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		return log.ConfigureLogrus(logrusLogger, logCfg)
+	}
+
 	if err := c.Execute(); err != nil {
 		panic(err)
 	}

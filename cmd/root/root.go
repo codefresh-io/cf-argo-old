@@ -3,6 +3,7 @@ package root
 import (
 	"context"
 
+	"github.com/codefresh-io/cf-argo/cmd/install"
 	"github.com/codefresh-io/cf-argo/cmd/version"
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	"github.com/spf13/cobra"
@@ -20,6 +21,7 @@ func New(ctx context.Context) *cobra.Command {
 	}
 
 	cmd.AddCommand(version.New(ctx))
+	cmd.AddCommand(install.New(ctx))
 
 	return cmd
 }
