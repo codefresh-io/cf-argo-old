@@ -25,10 +25,12 @@ type Logger interface {
 	Info(...interface{})
 	Warn(...interface{})
 	Fatal(...interface{})
+	Error(...interface{})
 	Debugf(string, ...interface{})
 	Infof(string, ...interface{})
 	Warnf(string, ...interface{})
 	Fatalf(string, ...interface{})
+	Errorf(string, ...interface{})
 
 	WithField(string, interface{}) Logger
 	WithFields(Fields) Logger
@@ -97,10 +99,12 @@ func (nopLogger) Debug(...interface{})                   {}
 func (nopLogger) Info(...interface{})                    {}
 func (nopLogger) Warn(...interface{})                    {}
 func (nopLogger) Fatal(...interface{})                   {}
+func (nopLogger) Error(...interface{})                   {}
 func (nopLogger) Debugf(string, ...interface{})          {}
 func (nopLogger) Infof(string, ...interface{})           {}
 func (nopLogger) Warnf(string, ...interface{})           {}
 func (nopLogger) Fatalf(string, ...interface{})          {}
+func (nopLogger) Errorf(string, ...interface{})          {}
 func (l nopLogger) WithField(string, interface{}) Logger { return l }
 func (l nopLogger) WithFields(Fields) Logger             { return l }
 func (l nopLogger) WithError(error) Logger               { return l }

@@ -13,13 +13,12 @@ import (
 )
 
 func main() {
+	logrusLogger := logrus.StandardLogger()
 	ctx := context.Background()
+	ctx = log.WithLogger(ctx, log.FromLogrus(logrus.NewEntry(logrusLogger)))
 	ctx = contextWithCancel(ctx)
 
-	logrusLogger := logrus.StandardLogger()
-	ctx = log.WithLogger(ctx, log.FromLogrus(logrus.NewEntry(logrusLogger)))
-
-	logCfg := &log.Config{}
+	logCfg := &log.Config{Level: "info"}
 
 	c := root.New(ctx)
 	c.PersistentFlags().AddFlagSet(logCfg.FlagSet())
@@ -38,7 +37,8 @@ func contextWithCancel(ctx context.Context) context.Context {
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 
 	go func() {
-		<-sig
+		s := <-sig
+		log.G(ctx).Debugf("got signal: %s", s)
 		cancel()
 	}()
 
