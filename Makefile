@@ -8,6 +8,10 @@ GIT_COMMIT=$(shell git rev-parse HEAD)
 
 BASE_GIT_URL="https://github.com/noam-codefresh/argocd-production"
 
+ifndef GOPATH
+$(error GOPATH is not set, please make sure you set your GOPATH correctly!)
+endif
+
 .PHONY: build
 build:
 	@ OUT_DIR=$(OUT_DIR) \
@@ -29,8 +33,6 @@ lint: $(GOPATH)/bin/golangci-lint $(GOPATH)/bin/gocyclo
 	# Lint Go files
 	@golangci-lint run --fix
 
-	@gocyclo -over 10 .
-	
 
 .PHONY: clean
 clean:

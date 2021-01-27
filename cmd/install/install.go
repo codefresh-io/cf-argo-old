@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/codefresh-io/cf-argo/pkg/errors"
 	"github.com/codefresh-io/cf-argo/pkg/git"
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	"github.com/spf13/cobra"
@@ -34,9 +35,9 @@ func New(ctx context.Context) *cobra.Command {
 	cmd.Flags().StringVar(&opts.kubeContext, "kube-wefwefowemfowenfowejfnwiejfnwiejfnwcontext", "", "kube context")
 	cmd.Flags().StringVar(&opts.kubeConfigPath, "kube-config-path", "", "kube context")
 
-	cmd.MarkFlagRequired("repo-owner")
-	cmd.MarkFlagRequired("repo-name")
-	cmd.MarkFlagRequired("git-token")
+	errors.MustContext(ctx, cmd.MarkFlagRequired("repo-owner"))
+	errors.MustContext(ctx, cmd.MarkFlagRequired("repo-name"))
+	errors.MustContext(ctx, cmd.MarkFlagRequired("git-token"))
 
 	return cmd
 }
