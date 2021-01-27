@@ -24,11 +24,8 @@ build:
 $(GOPATH)/bin/golangci-lint:
 	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b `go env GOPATH`/bin v1.33.2
 
-$(GOPATH)/bin/gocyclo:
-	@go get github.com/fzipp/gocyclo/cmd/gocyclo
-
 .PHONY: lint
-lint: $(GOPATH)/bin/golangci-lint $(GOPATH)/bin/gocyclo
+lint: $(GOPATH)/bin/golangci-lint
 	@go mod tidy
 	# Lint Go files
 	@golangci-lint run --fix
