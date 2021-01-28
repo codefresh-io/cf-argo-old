@@ -77,7 +77,7 @@ func (g *github) Clone(ctx context.Context, opts *CloneOptions) (Repository, err
 		auth = opts.Auth
 	}
 	return Clone(ctx, &CloneOptions{
-		Url:  opts.Url,
+		URL:  opts.URL,
 		Path: opts.Path,
 		Auth: auth,
 	})

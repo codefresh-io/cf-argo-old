@@ -8,15 +8,21 @@ import (
 	"github.com/codefresh-io/cf-argo/pkg/log"
 	"github.com/go-git/go-git/plumbing/transport"
 	gg "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
 type (
 	// Repository represents a git repository
 	Repository interface {
-		Add(pattern string) error
-		Commit(msg string) error
-		Push(ctx context.Context) error
+		Add(ctx context.Context, pattern string) error
+
+		AddRemote(ctx context.Context, name, url string) error
+
+		// Commits all files and returns the commit sha
+		Commit(ctx context.Context, msg string) (string, error)
+
+		Push(context.Context, *PushOptions) error
 	}
 
 	// Provider represents a git provider
@@ -41,9 +47,18 @@ type (
 	}
 
 	CloneOptions struct {
-		Url  string
+		// URL clone url
+		URL string
+		// Path where to clone to
 		Path string
 		Auth *Auth
+		// Bare if true will not include .git directory
+		Bare bool
+	}
+
+	PushOptions struct {
+		RemoteName string
+		Auth       *Auth
 	}
 
 	repo struct {
@@ -68,30 +83,28 @@ func New(opts *Options) (Provider, error) {
 }
 
 func Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
-	var auth transport.AuthMethod
-
-	// use authentication
-	if opts.Auth != nil {
-		username := opts.Auth.Username
-		if username == "" {
-			username = "codefresh"
-		}
-		auth = &http.BasicAuth{
-			Username: username,
-			Password: opts.Auth.Password,
-		}
+	if opts == nil {
+		return nil, ErrNilOpts
 	}
 
+	auth := getAuth(opts.Auth)
 	log.G(ctx).WithFields(log.Fields{
-		"url":  opts.Url,
+		"url":  opts.URL,
 		"path": opts.Path,
 	}).Debug("cloning repo")
-	r, err := gg.PlainCloneContext(ctx, opts.Path, false, &gg.CloneOptions{
+
+	cloneOpts := &gg.CloneOptions{
 		Depth:    1,
-		URL:      opts.Url,
+		URL:      opts.URL,
 		Auth:     auth,
 		Progress: os.Stdout,
-	})
+	}
+	err := cloneOpts.Validate()
+	if err != nil {
+		return nil, err
+	}
+
+	r, err := gg.PlainCloneContext(ctx, opts.Path, opts.Bare, cloneOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +113,10 @@ func Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
 }
 
 func Init(ctx context.Context, path string) (Repository, error) {
+	if path == "" {
+		path = "."
+	}
+
 	l := log.G(ctx).WithFields(log.Fields{
 		"path": path,
 	})
@@ -114,7 +131,7 @@ func Init(ctx context.Context, path string) (Repository, error) {
 	return &repo{r}, err
 }
 
-func (r *repo) Add(pattern string) error {
+func (r *repo) Add(ctx context.Context, pattern string) error {
 	w, err := r.r.Worktree()
 	if err != nil {
 		return err
@@ -123,10 +140,87 @@ func (r *repo) Add(pattern string) error {
 	return w.AddGlob(pattern)
 }
 
-func (r *repo) Commit(msg string) error {
+func (r *repo) AddRemote(ctx context.Context, name, url string) error {
+	cfg := &config.RemoteConfig{
+		Name: name,
+		URLs: []string{url},
+	}
+	err := cfg.Validate()
+	if err != nil {
+		return err
+	}
+
+	_, err = r.r.CreateRemote(cfg)
+	if err != nil {
+		return err
+	}
+	log.G(ctx).WithFields(log.Fields{
+		"remote": cfg.Name,
+	}).Debug("added new remote")
+
 	return nil
 }
 
-func (r *repo) Push(ctx context.Context) error {
+func (r *repo) Commit(ctx context.Context, msg string) (string, error) {
+	wt, err := r.r.Worktree()
+	if err != nil {
+		return "", err
+	}
+
+	h, err := wt.Commit(msg, &gg.CommitOptions{
+		All: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	log.G(ctx).WithFields(log.Fields{
+		"sha": h.String(),
+	}).Debug("created new commit")
+
+	return h.String(), err
+}
+
+func (r *repo) Push(ctx context.Context, opts *PushOptions) error {
+	if opts == nil {
+		return ErrNilOpts
+	}
+
+	l := log.G(ctx).WithFields(log.Fields{
+		"remote": opts.RemoteName,
+	})
+	l.Debug("pushing to repo")
+
+	auth := getAuth(opts.Auth)
+	pushOpts := &gg.PushOptions{
+		RemoteName: opts.RemoteName,
+		Auth:       auth,
+		Progress:   os.Stdout,
+	}
+	err := pushOpts.Validate()
+	if err != nil {
+		return err
+	}
+
+	err = r.r.PushContext(ctx, pushOpts)
+	if err != nil {
+		return err
+	}
+
+	l.Debug("pushed to repo")
+	return nil
+}
+
+func getAuth(auth *Auth) transport.AuthMethod {
+	if auth != nil {
+		username := auth.Username
+		if username == "" {
+			username = "codefresh"
+		}
+		return &http.BasicAuth{
+			Username: username,
+			Password: auth.Password,
+		}
+	}
+
 	return nil
 }

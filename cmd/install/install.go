@@ -2,14 +2,17 @@ package install
 
 import (
 	"context"
-	"io/ioutil"
+	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/codefresh-io/cf-argo/pkg/errors"
 	"github.com/codefresh-io/cf-argo/pkg/git"
 	"github.com/codefresh-io/cf-argo/pkg/log"
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	"github.com/spf13/cobra"
+	"sigs.k8s.io/kustomize/api/filesys"
+	"sigs.k8s.io/kustomize/api/krusty"
 )
 
 type options struct {
@@ -37,7 +40,7 @@ func New(ctx context.Context) *cobra.Command {
 	cmd.Flags().StringVar(&opts.kubeContext, "kube-context", "", "kube context")
 	cmd.Flags().StringVar(&opts.kubeConfigPath, "kube-config-path", "", "kube context")
 
-	errors.MustContext(ctx, cmd.MarkFlagRequired("repo-owner"))
+	// errors.MustContext(ctx, cmd.MarkFlagRequired("repo-owner"))
 	errors.MustContext(ctx, cmd.MarkFlagRequired("repo-name"))
 	errors.MustContext(ctx, cmd.MarkFlagRequired("git-token"))
 
@@ -46,30 +49,53 @@ func New(ctx context.Context) *cobra.Command {
 
 func install(ctx context.Context, opts *options) error {
 	var err error
-	tmp, err := ioutil.TempDir("", "")
+	defer func() {
+		cleanup(ctx, err != nil, opts)
+	}()
+
+	err = cloneBase(ctx, opts.repoName)
 	if err != nil {
 		return err
 	}
-	defer cleanup(ctx, err != nil, tmp, opts)
 
-	o := &git.Options{
-		Type: "github", // TODO: support other types
+	// modify template with local data
+	data, err := buildArgocdResources(ctx, filepath.Join(opts.repoName, "argo-cd/overlays/production"))
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	return nil
+
+	r, err := git.Init(ctx, opts.repoName)
+	if err != nil {
+		return err
+	}
+
+	err = r.Add(ctx, ".")
+	if err != nil {
+		return err
+	}
+
+	_, err = r.Commit(ctx, "Initial commit")
+	if err != nil {
+		return err
+	}
+
+	cloneURL, err := createRepo(ctx, opts)
+	if err != nil {
+		return err
+	}
+
+	err = r.AddRemote(ctx, "origin", cloneURL)
+	if err != nil {
+		return err
+	}
+
+	err = r.Push(ctx, &git.PushOptions{
 		Auth: &git.Auth{
 			Password: opts.gitToken,
 		},
-	}
-
-	err = cloneBase(ctx, tmp)
-	if err != nil {
-		return err
-	}
-
-	p, err := git.New(o)
-	if err != nil {
-		return err
-	}
-
-	_, err = createRepo(ctx, p, opts.repoOwner, opts.repoName)
+	})
 	if err != nil {
 		return err
 	}
@@ -77,23 +103,51 @@ func install(ctx context.Context, opts *options) error {
 	return nil
 }
 
-func createRepo(ctx context.Context, p git.Provider, repoOwner, repoName string) (git.Repository, error) {
-	cloneURL, err := p.CreateRepository(ctx, repoOwner, repoName)
+func buildArgocdResources(ctx context.Context, path string) ([]byte, error) {
+	k := krusty.MakeKustomizer(filesys.MakeFsOnDisk(), krusty.MakeDefaultOptions())
+	res, err := k.Run(path)
 	if err != nil {
 		return nil, err
 	}
-	return p.Clone(ctx, &git.CloneOptions{
-		Url:  cloneURL,
-		Path: repoName,
+
+	data, err := res.AsYaml()
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
+
+func createRepo(ctx context.Context, opts *options) (string, error) {
+	p, err := git.New(&git.Options{
+		Type: "github", // TODO: support other types
+		Auth: &git.Auth{
+			Password: opts.gitToken,
+		},
 	})
+	if err != nil {
+		return "", err
+	}
+
+	cloneURL, err := p.CreateRepository(ctx, opts.repoOwner, opts.repoName)
+	if err != nil {
+		return "", err
+	}
+
+	return cloneURL, err
 }
 
 func cloneBase(ctx context.Context, path string) error {
 	baseGitURL := store.Get().BaseGitURL
 	_, err := git.Clone(ctx, &git.CloneOptions{
-		Url:  baseGitURL,
+		URL:  baseGitURL,
 		Path: path,
 	})
+	if err != nil {
+		return err
+	}
+
+	err = os.RemoveAll(filepath.Join(path, ".git"))
 	if err != nil {
 		return err
 	}
@@ -101,12 +155,7 @@ func cloneBase(ctx context.Context, path string) error {
 	return err
 }
 
-func cleanup(ctx context.Context, failed bool, tmpdir string, opts *options) {
-	log.G(ctx).Debugf("cleaning temp directory: %s", tmpdir)
-	if err := os.RemoveAll(tmpdir); err != nil {
-		log.G(ctx).WithError(err).Error("failed to clean temp directory")
-	}
-
+func cleanup(ctx context.Context, failed bool, opts *options) {
 	if failed {
 		log.G(ctx).Debugf("cleaning local user repo: %s", opts.repoName)
 		if err := os.RemoveAll(opts.repoName); err != nil && !os.IsNotExist(err) {

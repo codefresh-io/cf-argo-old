@@ -6,7 +6,7 @@ BINARY_NAME="cf-argo"
 VERSION="v0.0.1"
 GIT_COMMIT=$(shell git rev-parse HEAD)
 
-BASE_GIT_URL="https://github.com/noam-codefresh/argocd-production"
+BASE_GIT_URL="https://github.com/noam-codefresh/argocd-template"
 
 ifndef GOPATH
 $(error GOPATH is not set, please make sure you set your GOPATH correctly!)

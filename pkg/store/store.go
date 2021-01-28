@@ -11,7 +11,7 @@ var (
 	binaryName = "cf-argo"
 	version    = "v99.99.99"
 	gitCommit  = ""
-	baseGitURL = "https://github.com/noam-codefresh/argocd-production"
+	baseGitURL = "https://github.com/noam-codefresh/argocd-template"
 )
 
 type Version struct {
