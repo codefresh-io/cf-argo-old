@@ -1,12 +1,10 @@
 package helpers
-type: Opaque
 
-	"bytes"
+import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
 )
 
 func CopyDir(source, destination string) error {
