@@ -28,7 +28,7 @@ type Store struct {
 	BinaryName string
 	Version    Version
 	BaseGitURL string
-	KubeConfig kube.Config
+	KubeConfig *kube.Config
 }
 
 // Get returns the global store
@@ -36,13 +36,14 @@ func Get() *Store {
 	return &s
 }
 
-func (s *Store) NewKubeClient(ctx context.Context) (*kube.Client, error) {
-	return kube.NewForConfig(ctx, &s.KubeConfig)
+func (s *Store) NewKubeClient(ctx context.Context) *kube.Client {
+	return kube.NewForConfig(ctx, s.KubeConfig)
 }
 
 func init() {
 	s.BinaryName = binaryName
 	s.BaseGitURL = baseGitURL
+	s.KubeConfig = kube.NewConfig()
 
 	initVersion()
 }

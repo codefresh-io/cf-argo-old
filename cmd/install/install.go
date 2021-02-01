@@ -14,7 +14,6 @@ import (
 	"github.com/codefresh-io/cf-argo/pkg/helpers"
 	"github.com/codefresh-io/cf-argo/pkg/log"
 	"github.com/codefresh-io/cf-argo/pkg/store"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -83,16 +82,6 @@ func install(ctx context.Context, opts *options) error {
 		cleanup(ctx, err != nil, opts)
 	}()
 
-	cs, err := store.Get().NewKubeClient(ctx)
-	if err != nil {
-		return err
-	}
-	pods, err := cs.CoreV1().Pods("").List(ctx, v1.ListOptions{})
-	for _, p := range pods.Items {
-		log.G(ctx).Info(p.Name)
-	}
-	return nil
-
 	err = cloneBase(ctx, opts.repoName)
 	if err != nil {
 		return err
@@ -127,20 +116,20 @@ func install(ctx context.Context, opts *options) error {
 	return nil
 }
 
-func renderTpl(tpls string, values interface{}) (string, error) {
+func renderTpl(tpls string, values interface{}) ([]byte, error) {
 	tpl, err := template.New("").Parse(tpls)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	buf := bytes.NewBuffer(make([]byte, 0, 4096))
 
 	err = tpl.Execute(buf, values)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return buf.String(), nil
+	return buf.Bytes(), nil
 }
 
 func buildBootstrapResources(ctx context.Context, path string) ([]byte, error) {
