@@ -10,6 +10,7 @@ import (
 	"github.com/codefresh-io/cf-argo/pkg/log"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	_ "k8s.io/client-go/plugin/pkg/client/auth" // used for authentication with cloud providers
 )
 
 func main() {
@@ -27,7 +28,7 @@ func main() {
 	}
 
 	if err := c.Execute(); err != nil {
-		panic(err)
+		log.G(ctx).Fatal(err)
 	}
 }
 

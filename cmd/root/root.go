@@ -18,6 +18,8 @@ func New(ctx context.Context) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
+		SilenceUsage:  true, // will not display usage when RunE returns an error
+		SilenceErrors: true, // will not use fmt to print errors
 	}
 
 	cmd.AddCommand(version.New(ctx))

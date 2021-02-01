@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 
+	cferrors "github.com/codefresh-io/cf-argo/pkg/errors"
 	"github.com/codefresh-io/cf-argo/pkg/log"
+
 	"github.com/go-git/go-git/plumbing/transport"
 	gg "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -29,7 +31,7 @@ type (
 	Provider interface {
 		// CreateRepository creates the repository in the remote provider and returns a
 		// clone url
-		CreateRepository(ctx context.Context, owner, name string) (string, error)
+		CreateRepository(ctx context.Context, opts *CreateRepositoryOptions) (string, error)
 		Clone(ctx context.Context, opts *CloneOptions) (Repository, error)
 	}
 
@@ -61,6 +63,12 @@ type (
 		Auth       *Auth
 	}
 
+	CreateRepositoryOptions struct {
+		Owner   string
+		Name    string
+		Private bool
+	}
+
 	repo struct {
 		r *gg.Repository
 	}
@@ -69,7 +77,6 @@ type (
 // Errors
 var (
 	ErrProviderNotSupported = errors.New("git provider not supported")
-	ErrNilOpts              = errors.New("options cannot be nil")
 )
 
 // New creates a new git provider
@@ -84,7 +91,7 @@ func New(opts *Options) (Provider, error) {
 
 func Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
 	if opts == nil {
-		return nil, ErrNilOpts
+		return nil, cferrors.ErrNilOpts
 	}
 
 	auth := getAuth(opts.Auth)
@@ -97,7 +104,7 @@ func Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
 		Depth:    1,
 		URL:      opts.URL,
 		Auth:     auth,
-		Progress: os.Stdout,
+		Progress: os.Stderr,
 	}
 	err := cloneOpts.Validate()
 	if err != nil {
@@ -182,13 +189,8 @@ func (r *repo) Commit(ctx context.Context, msg string) (string, error) {
 
 func (r *repo) Push(ctx context.Context, opts *PushOptions) error {
 	if opts == nil {
-		return ErrNilOpts
+		return cferrors.ErrNilOpts
 	}
-
-	l := log.G(ctx).WithFields(log.Fields{
-		"remote": opts.RemoteName,
-	})
-	l.Debug("pushing to repo")
 
 	auth := getAuth(opts.Auth)
 	pushOpts := &gg.PushOptions{
@@ -200,6 +202,11 @@ func (r *repo) Push(ctx context.Context, opts *PushOptions) error {
 	if err != nil {
 		return err
 	}
+
+	l := log.G(ctx).WithFields(log.Fields{
+		"remote": pushOpts.RemoteName,
+	})
+	l.Debug("pushing to repo")
 
 	err = r.r.PushContext(ctx, pushOpts)
 	if err != nil {

@@ -1,8 +1,11 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"runtime"
+
+	"github.com/codefresh-io/cf-argo/pkg/kube"
 )
 
 var s Store
@@ -25,11 +28,16 @@ type Store struct {
 	BinaryName string
 	Version    Version
 	BaseGitURL string
+	KubeConfig kube.Config
 }
 
 // Get returns the global store
 func Get() *Store {
 	return &s
+}
+
+func (s *Store) NewKubeClient(ctx context.Context) (*kube.Client, error) {
+	return kube.NewForConfig(ctx, &s.KubeConfig)
 }
 
 func init() {

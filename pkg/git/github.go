@@ -6,7 +6,9 @@ import (
 
 	"net/http"
 
+	cferrors "github.com/codefresh-io/cf-argo/pkg/errors"
 	"github.com/codefresh-io/cf-argo/pkg/log"
+
 	gh "github.com/google/go-github/v32/github"
 )
 
@@ -43,16 +45,27 @@ func newGithub(opts *Options) (Provider, error) {
 	return g, nil
 }
 
-func (g *github) CreateRepository(ctx context.Context, org, name string) (string, error) {
+func (g *github) CreateRepository(ctx context.Context, opts *CreateRepositoryOptions) (string, error) {
 	l := log.G(ctx).WithFields(log.Fields{
-		"org":  org,
-		"repo": name,
+		"owner": opts.Owner,
+		"repo":  opts.Name,
 	})
 
 	l.Debug("creating repository")
+
+	authUser, _, err := g.client.Users.Get(ctx, "") // get authenticated user details
+	if err != nil {
+		return "", err
+	}
+
+	org := ""
+	if *authUser.Login != opts.Owner {
+		org = opts.Owner
+	}
+
 	r, _, err := g.client.Repositories.Create(ctx, org, &gh.Repository{
-		Name:    gh.String(name),
-		Private: gh.Bool(false),
+		Name:    gh.String(opts.Name),
+		Private: gh.Bool(opts.Private),
 	})
 	if err != nil {
 		return "", err
@@ -69,7 +82,7 @@ func (g *github) CreateRepository(ctx context.Context, org, name string) (string
 
 func (g *github) Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
 	if opts == nil {
-		return nil, ErrNilOpts
+		return nil, cferrors.ErrNilOpts
 	}
 
 	auth := g.opts.Auth
