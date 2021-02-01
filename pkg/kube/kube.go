@@ -2,6 +2,7 @@ package kube
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/spf13/viper"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/util/homedir"
+	"k8s.io/kubectl/pkg/cmd/apply"
 	kcmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
 
@@ -125,10 +127,32 @@ func NewForConfig(ctx context.Context, cfg *Config) *Client {
 	return &Client{kcmdutil.NewFactory(kcmdutil.NewMatchVersionFlags(cfg.cfg)), l}
 }
 
-func Apply(ctx context.Context, opts *ApplyOptions) error {
+func (c *Client) Apply(ctx context.Context, opts *ApplyOptions) error {
 	if opts == nil {
 		return cferrors.ErrNilOpts
 	}
+
+	if opts.IOStreams.Out == nil {
+		opts.IOStreams.Out = os.Stdout
+	}
+
+	if opts.IOStreams.ErrOut == nil {
+		opts.IOStreams.ErrOut = os.Stderr
+	}
+
+	applyOpts := apply.NewApplyOptions(opts.IOStreams)
+	applyOpts.Overwrite = opts.Overwrite
+	applyOpts.DryRunStrategy = opts.DryRunStrategy
+	applyOpts.PreProcessorFn = func() error {
+		c.log.Debug("running apply command")
+		return nil
+	}
+	applyOpts.PostProcessorFn = func() error {
+		c.log.Debug("finished running apply command")
+		return nil
+	}
+
+	return applyOpts.Run()
 }
 
 func defaultConfigPath() string {
