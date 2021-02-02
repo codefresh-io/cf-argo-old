@@ -1,13 +1,20 @@
 package helpers
 
 import (
+	"context"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
 
+	"github.com/codefresh-io/cf-argo/pkg/log"
 	"github.com/yargevad/filepathx"
+)
+
+const (
+	envNamePlaceholder = "envName"
 )
 
 func CopyDir(source, destination string) error {
@@ -35,10 +42,6 @@ func RenderDirRecurse(pattern string, values interface{}) error {
 	}
 
 	for _, match := range matches {
-		if strings.HasSuffix(match, "secret.yaml") { // TODO: make prettier
-			continue
-		}
-
 		tpl, err := template.ParseFiles(match)
 		if err != nil {
 			return err
@@ -57,4 +60,49 @@ func RenderDirRecurse(pattern string, values interface{}) error {
 	}
 
 	return nil
+}
+
+// TODO maybe there is a more efficient way to do this
+func RenameEnvNameRecurse(ctx context.Context, path, env string) error {
+	matches, err := filepathx.Glob(filepath.Join(path, fmt.Sprintf("**/%s", envNamePlaceholder)))
+	if err != nil {
+		return err
+	}
+
+	// rename just directories
+	for _, m := range matches {
+		if strings.HasSuffix(m, envNamePlaceholder) {
+			if err := renameEnvName(ctx, m, env); err != nil {
+				return err
+			}
+		}
+	}
+
+	// run again to rename nested files with envName
+	matches, err = filepathx.Glob(filepath.Join(path, fmt.Sprintf("**/%s.*", envNamePlaceholder)))
+	if err != nil {
+		return err
+	}
+	for _, m := range matches {
+		if strings.Contains(m, envNamePlaceholder) {
+			if err := renameEnvName(ctx, m, env); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func renameEnvName(ctx context.Context, old, env string) error {
+	ap, err := filepath.Abs(old)
+	if err != nil {
+		return err
+	}
+	newName := strings.Replace(ap, "envName", env, 1)
+	log.G(ctx).WithFields(log.Fields{
+		"old-path": ap,
+		"new-path": newName,
+	}).Debug("renaming with environment name")
+
+	return os.Rename(ap, newName)
 }

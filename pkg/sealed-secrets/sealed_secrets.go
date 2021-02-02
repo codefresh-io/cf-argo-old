@@ -1,24 +1,20 @@
 package sealed_secrets
 
 import (
-	"bytes"
 	"context"
-	"crypto/dsa"
-	"crypto/ecdsa"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
-	"io"
+	"io/ioutil"
 
-	"github.com/bitnami-labs/sealed-secrets/pkg/crypto"
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	apiv1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	rest "k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/scheme"
 )
 
@@ -151,105 +147,94 @@ func (s ByCreationTimestamp) Less(i, j int) bool {
 	return s[i].GetCreationTimestamp().Unix() < s[j].GetCreationTimestamp().Unix()
 }
 
-func CreateSealedSecret(ctx context.Context, secretPath string) error {
+func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath string) (*SealedSecret, error) {
 	conf, err := store.Get().NewKubeClient(ctx).ToRESTConfig()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	restClient, err := corev1.NewForConfig(conf)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	rsaPub, err := getPubKey(ctx, restClient)
+	if err != nil {
+		return nil, errors.New("unexpected public key type")
+	}
+
+	s, err := getSecretFromFile(ctx, secretPath)
+	if err != nil {
+		return nil, err
+	}
+
+	sealedSecret, err := newSealedSecret(scheme.Codecs, rsaPub, s)
+	if err != nil {
+		return nil, err
+	}
+
+	rc, err := rest.RESTClientFor(conf)
+	if err != nil {
+		return nil, err
+	}
+
+	return sealedSecret, rc.Post().
+		Namespace(namespace).
+		Resource(SealedSecretPlural).
+		Body(sealedSecret).
+		Do(ctx).
+		Error()
+}
+
+func getSecretFromFile(ctx context.Context, secretPath string) (*v1.Secret, error) {
+	d := scheme.Codecs.UniversalDeserializer()
+	bytes, err := ioutil.ReadFile(secretPath)
+	if err != nil {
+		return nil, err
+	}
+
+	o, _, err := d.Decode(bytes, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	switch s := o.(type) {
+	case *v1.Secret:
+		return s, nil
+	default:
+		k := s.GetObjectKind().GroupVersionKind()
+		return nil, errors.New(fmt.Sprintf("unexpected runtime object of type: %s", k))
+	}
+}
+
+func getPubKey(ctx context.Context, restClient *corev1.CoreV1Client) (*rsa.PublicKey, error) {
 	f, err := restClient.
 		Services("envname-argocd").
 		ProxyGet("http", "sealed-secrets-controller", "", "/v1/cert.pem", nil).
 		Stream(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	buf := new(bytes.Buffer)
-	_, err = io.Copy(buf, f)
-	block, _ := pem.Decode(buf)
+	bytes, err := ioutil.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+
+	block, _ := pem.Decode(bytes)
 	if block == nil {
-		panic("failed to parse PEM block containing the public key")
+		return nil, err
 	}
 
 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
-		panic("failed to parse DER encoded public key: " + err.Error())
+		return nil, err
 	}
 
-	switch pub := pub.(type) {
-	case *rsa.PublicKey:
-		fmt.Println("pub is of type RSA:", pub)
-	case *dsa.PublicKey:
-		fmt.Println("pub is of type DSA:", pub)
-	case *ecdsa.PublicKey:
-		fmt.Println("pub is of type ECDSA:", pub)
-	default:
-		panic("unknown type of public key")
+	rsaPub, ok := pub.(*rsa.PublicKey)
+	if !ok {
+		return nil, errors.New("unexpected public key type")
 	}
 
-	sealedSecret, err := ssApi.NewSealedSecret(scheme.Codecs, nil /*rsa.publickey*/, nil /*secret*/)
-
-	sealedSecret, err = ssClient.SealedSecrets("some-namespace").Create(sealedSecret)
-	return nil
-}
-
-func NewSealedSecret(codecs runtimeserializer.CodecFactory, pubKey *rsa.PublicKey, secret *v1.Secret) (*SealedSecret, error) {
-	// if SecretScope(secret) != ClusterWideScope && secret.GetNamespace() == "" {
-	// 	return nil, fmt.Errorf("secret must declare a namespace")
-	// }
-
-	s := &SealedSecret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      secret.GetName(),
-			Namespace: secret.GetNamespace(),
-		},
-		Spec: SealedSecretSpec{
-			Template: SecretTemplateSpec{
-				// ObjectMeta copied below
-				Type: secret.Type,
-			},
-			EncryptedData: map[string]string{},
-		},
-	}
-	secret.ObjectMeta.DeepCopyInto(&s.Spec.Template.ObjectMeta)
-
-	// the input secret could come from a real secret object applied with `kubectl apply` or similar tools
-	// which put a copy of the object version at application time in an annotation in order to support
-	// strategic merge patch in subsequent updates. We need to strip those annotations or else we would
-	// be leaking secrets in clear in a way that might be non obvious to users.
-	// See https://github.com/bitnami-labs/sealed-secrets/issues/227
-	StripLastAppliedAnnotations(s.Spec.Template.ObjectMeta.Annotations)
-
-	// Cleanup ownerReference (See #243)
-	s.Spec.Template.ObjectMeta.OwnerReferences = nil
-
-	// RSA-OAEP will fail to decrypt unless the same label is used
-	// during decryption.
-	label := labelFor(secret)
-
-	for key, value := range secret.Data {
-		ciphertext, err := crypto.HybridEncrypt(rand.Reader, pubKey, value, label)
-		if err != nil {
-			return nil, err
-		}
-		s.Spec.EncryptedData[key] = base64.StdEncoding.EncodeToString(ciphertext)
-	}
-
-	for key, value := range secret.StringData {
-		ciphertext, err := crypto.HybridEncrypt(rand.Reader, pubKey, []byte(value), label)
-		if err != nil {
-			return nil, err
-		}
-		s.Spec.EncryptedData[key] = base64.StdEncoding.EncodeToString(ciphertext)
-	}
-
-	s.Annotations = UpdateScopeAnnotations(s.Annotations, SecretScope(secret))
-
-	return s, nil
+	return rsaPub, nil
 }

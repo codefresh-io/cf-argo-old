@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"text/template"
@@ -12,10 +12,14 @@ import (
 	"github.com/codefresh-io/cf-argo/pkg/errors"
 	"github.com/codefresh-io/cf-argo/pkg/git"
 	"github.com/codefresh-io/cf-argo/pkg/helpers"
+	"github.com/codefresh-io/cf-argo/pkg/kube"
 	"github.com/codefresh-io/cf-argo/pkg/log"
+	ss "github.com/codefresh-io/cf-argo/pkg/sealed-secrets"
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
+	"k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/kustomize/api/filesys"
 	"sigs.k8s.io/kustomize/api/krusty"
 )
@@ -81,8 +85,12 @@ func install(ctx context.Context, opts *options) error {
 		cleanup(ctx, err != nil, opts)
 	}()
 
-	// createSealedSecret(ctx)
 	err = cloneBase(ctx, opts.repoName)
+	if err != nil {
+		return err
+	}
+
+	err = renderDir(ctx, opts.repoName)
 	if err != nil {
 		return err
 	}
@@ -93,17 +101,16 @@ func install(ctx context.Context, opts *options) error {
 		return err
 	}
 
-	out, err := renderTpl(string(data), values)
+	err = applyBootstrapResources(ctx, data, opts)
 	if err != nil {
 		return err
 	}
-	fmt.Println(out)
 
 	if opts.dryRun {
 		return nil
 	}
 
-	err = helpers.RenderDirRecurse(filepath.Join(opts.repoName, "**/*.yaml"), values)
+	err = createSealedSecret(ctx)
 	if err != nil {
 		return err
 	}
@@ -116,20 +123,49 @@ func install(ctx context.Context, opts *options) error {
 	return nil
 }
 
-func renderTpl(tpls string, values interface{}) ([]byte, error) {
-	tpl, err := template.New("").Parse(tpls)
+func createSealedSecret(ctx context.Context) error {
+	s, err := ss.CreateSealedSecretFromSecretFile(ctx, "argocd", filepath.Join(values.RepoName, "secret.yaml"))
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	buf := bytes.NewBuffer(make([]byte, 0, 4096))
-
-	err = tpl.Execute(buf, values)
+	bytes, err := yaml.Marshal(s)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return buf.Bytes(), nil
+	return ioutil.WriteFile(
+		filepath.Join(
+			values.RepoName,
+			"kustomize",
+			"components",
+			"argo-cd",
+			"overlays",
+			values.EnvName,
+			"sealed-secret.yaml",
+		),
+		bytes,
+		0644,
+	)
+}
+
+func applyBootstrapResources(ctx context.Context, manifests []byte, opts *options) error {
+	d := util.DryRunNone
+	if opts.dryRun {
+		d = util.DryRunClient
+	}
+	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
+		Manifests:      manifests,
+		DryRunStrategy: d,
+	})
+}
+
+func renderDir(ctx context.Context, path string) error {
+	if err := helpers.RenameEnvNameRecurse(ctx, path, values.EnvName); err != nil {
+		return err
+	}
+
+	return helpers.RenderDirRecurse(filepath.Join(path, "**/*.yaml"), values)
 }
 
 func buildBootstrapResources(ctx context.Context, path string) ([]byte, error) {
@@ -144,13 +180,36 @@ func buildBootstrapResources(ctx context.Context, path string) ([]byte, error) {
 		return nil, err
 	}
 
-	return data, nil
+	tpl, err := template.New("").Parse(string(data))
+	if err != nil {
+		return nil, err
+	}
+
+	buf := bytes.NewBuffer(make([]byte, 0, 4096))
+
+	err = tpl.Execute(buf, values)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
 
 func persistGitopsRepo(ctx context.Context, opts *options) error {
 	r, err := git.Init(ctx, opts.repoName)
 	if err != nil {
 		return err
+	}
+
+	files, err := filepath.Glob(filepath.Join(opts.repoName, "*.yaml"))
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		log.G(ctx).WithField("path", f).Debug("removing file")
+		if err := os.Remove(f); err != nil {
+			return err
+		}
 	}
 
 	err = r.Add(ctx, ".")
