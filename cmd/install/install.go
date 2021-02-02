@@ -14,7 +14,6 @@ import (
 	"github.com/codefresh-io/cf-argo/pkg/helpers"
 	"github.com/codefresh-io/cf-argo/pkg/log"
 	"github.com/codefresh-io/cf-argo/pkg/store"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"sigs.k8s.io/kustomize/api/filesys"
@@ -82,6 +81,7 @@ func install(ctx context.Context, opts *options) error {
 		cleanup(ctx, err != nil, opts)
 	}()
 
+	// createSealedSecret(ctx)
 	err = cloneBase(ctx, opts.repoName)
 	if err != nil {
 		return err
