@@ -96,9 +96,6 @@ func (c *Client) wait(ctx context.Context, opts *WaitOptions) error {
 	}
 
 	itr := 0
-	l := log.G(ctx).WithFields(log.Fields{
-		"itr": itr,
-	})
 
 	rscs := map[*ResourceInfo]bool{}
 	for _, r := range opts.Resources {
@@ -108,9 +105,10 @@ func (c *Client) wait(ctx context.Context, opts *WaitOptions) error {
 	return wait.PollImmediate(opts.Interval, opts.Timeout, func() (done bool, err error) {
 		itr += 1
 		allReady := true
-		l.Debug("starting new wait poll event")
+		log.G(ctx).Debug("starting new wait poll event")
 		for r := range rscs {
-			ll := l.WithFields(log.Fields{
+			ll := log.G(ctx).WithFields(log.Fields{
+				"itr":       itr,
 				"name":      r.Name,
 				"namespace": r.Namespace,
 			})

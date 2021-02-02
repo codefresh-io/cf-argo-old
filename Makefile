@@ -21,6 +21,10 @@ build:
 	BASE_GIT_URL=$(BASE_GIT_URL) \
 	./hack/build.sh
 
+.PHONY: install
+install: build
+	@ln -s $(shell pwd)/$(OUT_DIR)/$(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)
+
 $(GOPATH)/bin/golangci-lint:
 	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b `go env GOPATH`/bin v1.33.2
 

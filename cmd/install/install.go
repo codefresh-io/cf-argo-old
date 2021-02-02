@@ -97,6 +97,7 @@ func install(ctx context.Context, opts *options) error {
 		cleanup(ctx, err != nil, opts)
 	}()
 
+	fmt.Println("cloning template repository...")
 	err = cloneBase(ctx, opts.repoName)
 	if err != nil {
 		return err
@@ -108,6 +109,7 @@ func install(ctx context.Context, opts *options) error {
 	}
 
 	// modify template with local data
+	fmt.Println("building bootstrap resources...")
 	data, err := buildBootstrapResources(ctx, opts.repoName)
 	if err != nil {
 		return err
@@ -118,15 +120,23 @@ func install(ctx context.Context, opts *options) error {
 		return nil
 	}
 
+	fmt.Println("applying resource to cluster...")
 	err = applyBootstrapResources(ctx, data, opts)
 	if err != nil {
 		return err
 	}
 
+	fmt.Println("waiting for argocd initialization to complete... (might take a few seconds)")
 	err = waitForDeployments(ctx)
 	if err != nil {
 		return err
 	}
+
+	passwd, err := getArgocdPassword(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("argocd initialized. password:", passwd)
 
 	err = createSealedSecret(ctx, opts)
 	if err != nil {
@@ -138,6 +148,7 @@ func install(ctx context.Context, opts *options) error {
 		return err
 	}
 
+	fmt.Println("")
 	err = persistGitopsRepo(ctx, opts)
 	if err != nil {
 		return err
@@ -168,7 +179,7 @@ func waitForDeployments(ctx context.Context) error {
 	ns := values.Namespace
 	o := &kube.WaitOptions{
 		Interval: time.Second * 2,
-		Timeout:  time.Second * 30,
+		Timeout:  time.Minute * 2,
 		Resources: []*kube.ResourceInfo{
 			{
 				Name:      "argocd-server",
@@ -176,16 +187,37 @@ func waitForDeployments(ctx context.Context) error {
 				Func:      deploymentTest,
 			},
 			{
-				Name:      "argocd-server",
+				Name:      "sealed-secrets-controller",
 				Namespace: ns,
 				Func:      deploymentTest,
 			},
 		},
 	}
 
-	fmt.Println("starting for argocd initialization to complete... (might take a few seconds)")
-
 	return store.Get().NewKubeClient(ctx).Wait(ctx, o)
+}
+
+func getArgocdPassword(ctx context.Context) (string, error) {
+	cs, err := store.Get().NewKubeClient(ctx).KubernetesClientSet()
+	if err != nil {
+		return "", err
+	}
+	secret, err := cs.CoreV1().Secrets(values.Namespace).Get(ctx, "argocd-initial-admin-secret", v1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	pbase64, ok := secret.Data["password"]
+	if !ok {
+		return "", fmt.Errorf("argocd initial password not found")
+	}
+
+	buf := make([]byte, 256)
+	n, err := base64.StdEncoding.Decode(buf, pbase64)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode argocd password")
+	}
+
+	return string(buf[:n]), nil
 }
 
 func createArgocdApp(ctx context.Context, opts *options) error {
