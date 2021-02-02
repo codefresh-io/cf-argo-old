@@ -132,14 +132,12 @@ func install(ctx context.Context, opts *options) error {
 		return err
 	}
 
-	passwd, err := getArgocdPassword(ctx)
+	err = createSealedSecret(ctx, opts)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("argocd initialized. password: %s\n", passwd)
-	fmt.Printf("run: kubectl port-forward -n %s svc/argocd-server 8080:80\n", values.Namespace)
 
-	err = createSealedSecret(ctx, opts)
+	err = persistGitopsRepo(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -149,10 +147,12 @@ func install(ctx context.Context, opts *options) error {
 		return err
 	}
 
-	err = persistGitopsRepo(ctx, opts)
+	passwd, err := getArgocdPassword(ctx)
 	if err != nil {
 		return err
 	}
+	fmt.Printf("argocd initialized. password: %s\n", passwd)
+	fmt.Printf("run: kubectl port-forward -n %s svc/argocd-server 8080:80\n", values.Namespace)
 
 	return nil
 }
