@@ -136,7 +136,7 @@ func install(ctx context.Context, opts *options) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("argocd initialized. password:", passwd)
+	fmt.Printf("argocd initialized. password: %s\n", passwd)
 
 	err = createSealedSecret(ctx, opts)
 	if err != nil {
@@ -148,7 +148,6 @@ func install(ctx context.Context, opts *options) error {
 		return err
 	}
 
-	fmt.Println("")
 	err = persistGitopsRepo(ctx, opts)
 	if err != nil {
 		return err
@@ -340,6 +339,7 @@ func persistGitopsRepo(ctx context.Context, opts *options) error {
 		return err
 	}
 
+	fmt.Printf("creating gitops repository: %s/%s...\n", opts.repoOwner, opts.repoName)
 	cloneURL, err := createRemoteRepo(ctx, opts)
 	if err != nil {
 		return err
@@ -350,6 +350,7 @@ func persistGitopsRepo(ctx context.Context, opts *options) error {
 		return err
 	}
 
+	fmt.Println("pushing to gitops repo...")
 	err = r.Push(ctx, &git.PushOptions{
 		Auth: &git.Auth{
 			Password: opts.gitToken,
