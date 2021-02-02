@@ -248,7 +248,7 @@ func renderDir(ctx context.Context, path string) error {
 		return err
 	}
 
-	return helpers.RenderDirRecurse(filepath.Join(path, "**/*"), values)
+	return helpers.RenderDirRecurse(filepath.Join(path, "**/*.*"), values)
 }
 
 func buildBootstrapResources(ctx context.Context, path string) ([]byte, error) {
