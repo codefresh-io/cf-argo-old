@@ -137,7 +137,7 @@ func install(ctx context.Context, opts *options) error {
 		return err
 	}
 	fmt.Printf("argocd initialized. password: %s\n", passwd)
-	fmt.Printf("run: kubectl port-forward -n %s svc/argocd-server 8080:8080\n", values.Namespace)
+	fmt.Printf("run: kubectl port-forward -n %s svc/argocd-server 8080:80\n", values.Namespace)
 
 	err = createSealedSecret(ctx, opts)
 	if err != nil {
@@ -206,18 +206,12 @@ func getArgocdPassword(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	pbase64, ok := secret.Data["password"]
+	passwd, ok := secret.Data["password"]
 	if !ok {
 		return "", fmt.Errorf("argocd initial password not found")
 	}
 
-	buf := make([]byte, 256)
-	n, err := base64.StdEncoding.Decode(buf, pbase64)
-	if err != nil {
-		return "", fmt.Errorf("failed to decode argocd password")
-	}
-
-	return string(buf[:n]), nil
+	return string(passwd), nil
 }
 
 func createArgocdApp(ctx context.Context, opts *options) error {
