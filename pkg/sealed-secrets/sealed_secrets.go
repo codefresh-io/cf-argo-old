@@ -3,10 +3,9 @@ package sealed_secrets
 import (
 	"context"
 	"crypto/rsa"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 
 	"github.com/codefresh-io/cf-argo/pkg/store"
@@ -14,7 +13,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	rest "k8s.io/client-go/rest"
+	"k8s.io/client-go/util/cert"
 	"k8s.io/kubectl/pkg/scheme"
 )
 
@@ -148,19 +147,9 @@ func (s ByCreationTimestamp) Less(i, j int) bool {
 }
 
 func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath string) (*SealedSecret, error) {
-	conf, err := store.Get().NewKubeClient(ctx).ToRESTConfig()
+	rsaPub, err := getPubKey(ctx, namespace)
 	if err != nil {
 		return nil, err
-	}
-
-	restClient, err := corev1.NewForConfig(conf)
-	if err != nil {
-		return nil, err
-	}
-
-	rsaPub, err := getPubKey(ctx, restClient)
-	if err != nil {
-		return nil, errors.New("unexpected public key type")
 	}
 
 	s, err := getSecretFromFile(ctx, secretPath)
@@ -168,22 +157,7 @@ func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath
 		return nil, err
 	}
 
-	sealedSecret, err := newSealedSecret(scheme.Codecs, rsaPub, s)
-	if err != nil {
-		return nil, err
-	}
-
-	rc, err := rest.RESTClientFor(conf)
-	if err != nil {
-		return nil, err
-	}
-
-	return sealedSecret, rc.Post().
-		Namespace(namespace).
-		Resource(SealedSecretPlural).
-		Body(sealedSecret).
-		Do(ctx).
-		Error()
+	return newSealedSecret(scheme.Codecs, rsaPub, s)
 }
 
 func getSecretFromFile(ctx context.Context, secretPath string) (*v1.Secret, error) {
@@ -203,38 +177,49 @@ func getSecretFromFile(ctx context.Context, secretPath string) (*v1.Secret, erro
 		return s, nil
 	default:
 		k := s.GetObjectKind().GroupVersionKind()
-		return nil, errors.New(fmt.Sprintf("unexpected runtime object of type: %s", k))
+		return nil, fmt.Errorf("unexpected runtime object of type: %s", k)
 	}
 }
 
-func getPubKey(ctx context.Context, restClient *corev1.CoreV1Client) (*rsa.PublicKey, error) {
+func getPubKey(ctx context.Context, ns string) (*rsa.PublicKey, error) {
+	conf, err := store.Get().NewKubeClient(ctx).ToRESTConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	restClient, err := corev1.NewForConfig(conf)
+	if err != nil {
+		return nil, err
+	}
+
 	f, err := restClient.
-		Services("envname-argocd").
+		Services(ns).
 		ProxyGet("http", "sealed-secrets-controller", "", "/v1/cert.pem", nil).
 		Stream(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 
-	bytes, err := ioutil.ReadAll(f)
+	return parseKey(f)
+}
+
+func parseKey(r io.Reader) (*rsa.PublicKey, error) {
+	data, err := ioutil.ReadAll(r)
 	if err != nil {
 		return nil, err
 	}
-
-	block, _ := pem.Decode(bytes)
-	if block == nil {
-		return nil, err
-	}
-
-	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	certs, err := cert.ParseCertsPEM(data)
 	if err != nil {
 		return nil, err
 	}
-
-	rsaPub, ok := pub.(*rsa.PublicKey)
+	// ParseCertsPem returns error if len(certs) == 0, but best to be sure...
+	if len(certs) == 0 {
+		return nil, errors.New("Failed to read any certificates")
+	}
+	cert, ok := certs[0].PublicKey.(*rsa.PublicKey)
 	if !ok {
-		return nil, errors.New("unexpected public key type")
+		return nil, fmt.Errorf("Expected RSA public key but found %v", certs[0].PublicKey)
 	}
-
-	return rsaPub, nil
+	return cert, nil
 }

@@ -105,6 +105,10 @@ func newSealedSecret(codecs runtimeserializer.CodecFactory, pubKey *rsa.PublicKe
 	}
 
 	s := &SealedSecret{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "SealedSecret",
+			APIVersion: "bitnami.com/v1alpha1",
+		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      secret.GetName(),
 			Namespace: secret.GetNamespace(),

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -18,7 +20,8 @@ import (
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"gopkg.in/yaml.v3"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/kustomize/api/filesys"
 	"sigs.k8s.io/kustomize/api/krusty"
@@ -32,10 +35,12 @@ type options struct {
 }
 
 var values struct {
-	GitToken  string
-	EnvName   string
-	RepoOwner string
-	RepoName  string
+	ArgoAppsDir string
+	GitToken    string
+	EnvName     string
+	Namespace   string
+	RepoOwner   string
+	RepoName    string
 }
 
 func New(ctx context.Context) *cobra.Command {
@@ -73,8 +78,10 @@ func New(ctx context.Context) *cobra.Command {
 
 // fill the values used to render the templates
 func fillValues(opts *options) {
+	values.ArgoAppsDir = "argocd-apps"
 	values.GitToken = base64.StdEncoding.EncodeToString([]byte(opts.gitToken))
 	values.EnvName = "production"
+	values.Namespace = fmt.Sprintf("%s-argocd", values.EnvName)
 	values.RepoOwner = opts.repoOwner
 	values.RepoName = opts.repoName
 }
@@ -101,16 +108,27 @@ func install(ctx context.Context, opts *options) error {
 		return err
 	}
 
+	if opts.dryRun {
+		fmt.Println(string(data))
+		return nil
+	}
+
 	err = applyBootstrapResources(ctx, data, opts)
 	if err != nil {
 		return err
 	}
 
-	if opts.dryRun {
-		return nil
+	err = waitForDeployments(ctx)
+	if err != nil {
+		return err
 	}
 
-	err = createSealedSecret(ctx)
+	err = createSealedSecret(ctx, opts)
+	if err != nil {
+		return err
+	}
+
+	err = createArgocdApp(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -123,13 +141,69 @@ func install(ctx context.Context, opts *options) error {
 	return nil
 }
 
-func createSealedSecret(ctx context.Context) error {
-	s, err := ss.CreateSealedSecretFromSecretFile(ctx, "argocd", filepath.Join(values.RepoName, "secret.yaml"))
+func apply(ctx context.Context, opts *options, data []byte) error {
+	d := util.DryRunNone
+	if opts.dryRun {
+		d = util.DryRunClient
+	}
+	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
+		Manifests:      data,
+		DryRunStrategy: d,
+	})
+}
+
+func waitForDeployments(ctx context.Context) error {
+	deploymentTest := func(ctx context.Context, cs kubernetes.Interface, ns, name string) (bool, error) {
+		d, err := cs.AppsV1().Deployments(ns).Get(ctx, name, v1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		return d.Status.ReadyReplicas >= *d.Spec.Replicas, nil
+	}
+	ns := values.Namespace
+	o := &kube.WaitOptions{
+		Resources: []*kube.ResourceInfo{
+			{
+				Name:      "argocd-server",
+				Namespace: ns,
+				Func:      deploymentTest,
+			},
+			{
+				Name:      "argocd-server",
+				Namespace: ns,
+				Func:      deploymentTest,
+			},
+		},
+	}
+
+	return store.Get().NewKubeClient(ctx).Wait(ctx, o)
+}
+
+func createArgocdApp(ctx context.Context, opts *options) error {
+	data, err := ioutil.ReadFile(filepath.Join(
+		values.RepoName,
+		values.ArgoAppsDir,
+		fmt.Sprintf("%s.yaml", values.EnvName),
+	))
 	if err != nil {
 		return err
 	}
 
-	bytes, err := yaml.Marshal(s)
+	return apply(ctx, opts, data)
+}
+
+func createSealedSecret(ctx context.Context, opts *options) error {
+	s, err := ss.CreateSealedSecretFromSecretFile(ctx, values.Namespace, filepath.Join(values.RepoName, "secret.yaml"))
+	if err != nil {
+		return err
+	}
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+
+	err = apply(ctx, opts, data)
 	if err != nil {
 		return err
 	}
@@ -142,9 +216,9 @@ func createSealedSecret(ctx context.Context) error {
 			"argo-cd",
 			"overlays",
 			values.EnvName,
-			"sealed-secret.yaml",
+			"sealed-secret.json",
 		),
-		bytes,
+		data,
 		0644,
 	)
 }
@@ -165,11 +239,14 @@ func renderDir(ctx context.Context, path string) error {
 		return err
 	}
 
-	return helpers.RenderDirRecurse(filepath.Join(path, "**/*.yaml"), values)
+	return helpers.RenderDirRecurse(filepath.Join(path, "**/*"), values)
 }
 
 func buildBootstrapResources(ctx context.Context, path string) ([]byte, error) {
-	k := krusty.MakeKustomizer(filesys.MakeFsOnDisk(), krusty.MakeDefaultOptions())
+	opts := krusty.MakeDefaultOptions()
+	opts.DoLegacyResourceSort = true
+
+	k := krusty.MakeKustomizer(filesys.MakeFsOnDisk(), opts)
 	res, err := k.Run(path)
 	if err != nil {
 		return nil, err
