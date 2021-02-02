@@ -30,6 +30,7 @@ import (
 type options struct {
 	repoOwner string
 	repoName  string
+	envName   string
 	gitToken  string
 	dryRun    bool
 }
@@ -58,6 +59,7 @@ func New(ctx context.Context) *cobra.Command {
 
 	errors.MustContext(ctx, viper.BindEnv("repo-owner", "REPO_OWNER"))
 	errors.MustContext(ctx, viper.BindEnv("repo-name", "REPO_NAME"))
+	errors.MustContext(ctx, viper.BindEnv("env-name", "ENV_NAME"))
 	errors.MustContext(ctx, viper.BindEnv("git-token", "GIT_TOKEN"))
 	viper.SetDefault("repo-name", "cf-argo")
 
@@ -67,10 +69,12 @@ func New(ctx context.Context) *cobra.Command {
 
 	cmd.Flags().StringVar(&opts.repoOwner, "repo-owner", viper.GetString("repo-owner"), "name of the repository owner, defaults to [REPO_OWNER] environment variable")
 	cmd.Flags().StringVar(&opts.repoName, "repo-name", viper.GetString("repo-name"), "name of the repository that will be created and used for the bootstrap installation")
+	cmd.Flags().StringVar(&opts.envName, "env-name", viper.GetString("env-name"), "name of the Argo Enterprise environment to create")
 	cmd.Flags().StringVar(&opts.gitToken, "git-token", viper.GetString("git-token"), "git token which will be used by argo-cd to create the gitops repository")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, "when true, the command will have no side effects, and will only output the manifests to stdout")
 
 	errors.MustContext(ctx, cmd.MarkFlagRequired("repo-owner"))
+	errors.MustContext(ctx, cmd.MarkFlagRequired("env-name"))
 	errors.MustContext(ctx, cmd.MarkFlagRequired("git-token"))
 
 	return cmd
@@ -80,7 +84,7 @@ func New(ctx context.Context) *cobra.Command {
 func fillValues(opts *options) {
 	values.ArgoAppsDir = "argocd-apps"
 	values.GitToken = base64.StdEncoding.EncodeToString([]byte(opts.gitToken))
-	values.EnvName = "production"
+	values.EnvName = opts.envName
 	values.Namespace = fmt.Sprintf("%s-argocd", values.EnvName)
 	values.RepoOwner = opts.repoOwner
 	values.RepoName = opts.repoName
