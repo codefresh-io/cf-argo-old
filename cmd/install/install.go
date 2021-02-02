@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"text/template"
+	"time"
 
 	"github.com/codefresh-io/cf-argo/pkg/errors"
 	"github.com/codefresh-io/cf-argo/pkg/git"
@@ -166,6 +167,8 @@ func waitForDeployments(ctx context.Context) error {
 	}
 	ns := values.Namespace
 	o := &kube.WaitOptions{
+		Interval: time.Second * 2,
+		Timeout:  time.Second * 30,
 		Resources: []*kube.ResourceInfo{
 			{
 				Name:      "argocd-server",
@@ -179,6 +182,8 @@ func waitForDeployments(ctx context.Context) error {
 			},
 		},
 	}
+
+	fmt.Println("starting for argocd initialization to complete... (might take a few seconds)")
 
 	return store.Get().NewKubeClient(ctx).Wait(ctx, o)
 }
