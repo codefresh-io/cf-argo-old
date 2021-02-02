@@ -137,6 +137,7 @@ func install(ctx context.Context, opts *options) error {
 		return err
 	}
 	fmt.Printf("argocd initialized. password: %s\n", passwd)
+	fmt.Printf("run: kubectl port-forward -n %s svc/argocd-server 8080:8080\n", values.Namespace)
 
 	err = createSealedSecret(ctx, opts)
 	if err != nil {
