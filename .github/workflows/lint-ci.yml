@@ -12,11 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: $GITHUB_WORKSPACE/go/src/github.com/$GITHUB_REPOSITORY
+        working-directory: /home/runner/work/go/src/github.com/codefresh-io/cf-argo
     steps:
     - uses: actions/checkout@v2
-      with:
-        path: go/src/github.com/$GITHUB_REPOSITORY
 
     - name: Set up Go
       uses: actions/setup-go@v2
@@ -26,7 +24,7 @@ jobs:
     - name: Build
       run: ls
       env:
-        GOPATH: $GITHUB_WORKSPACE/go
+        GOPATH: /home/runner/work/go
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v1.2.1
