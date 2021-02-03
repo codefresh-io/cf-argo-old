@@ -23,6 +23,7 @@ build:
 
 .PHONY: install
 install: build
+	@rm /usr/local/bin/$(BINARY_NAME) || true
 	@ln -s $(shell pwd)/$(OUT_DIR)/$(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)
 
 $(GOPATH)/bin/golangci-lint:
