@@ -10,13 +10,8 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: /home/runner/work/go/src/github.com/codefresh-io/cf-argo
     steps:
     - uses: actions/checkout@v2
-      with:
-        path: /home/runner/work/go/src/github.com/codefresh-io/cf-argo
 
     - name: Set up Go
       uses: actions/setup-go@v2
