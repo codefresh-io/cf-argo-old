@@ -32,9 +32,7 @@ $(GOPATH)/bin/golangci-lint:
 .PHONY: lint
 lint: $(GOPATH)/bin/golangci-lint
 	@go mod tidy
-	# Lint Go files
 	@golangci-lint run --fix
-
 
 .PHONY: clean
 clean:

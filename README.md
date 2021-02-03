@@ -8,22 +8,6 @@ we are using https://github.com/golangci/golangci-lint as our linter, you can in
 ```
 "go.lintTool": "golangci-lint",
 "go.lintFlags": [
-    "--fix"
+    "--fast"
 ],
 ```
-
-### Installation Steps
-1. [x] Clone
-2. [ ] Template Substitution
-3. [x] kustomize build
-4. [x] git
-   1. [x] init
-   2. [x] add
-   3. [x] commit
-   4. [x] create Remote repo
-   5. [x] push
-5. [ ] Add config-map + secret of token
-6. [ ] apply yaml from earlier
-7. [ ] Create seaeled-secret from secret
-8. [ ] add/commit/push
-9. [ ] party
