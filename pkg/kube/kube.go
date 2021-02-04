@@ -51,6 +51,14 @@ type (
 		// DryRunStrategy by default false, can be set to either "client" or "server" dry-run modes, see kubectl apply --help
 		DryRun bool
 	}
+
+	DeleteOptions struct {
+		// FileName the file containing the resources to delete
+		FileName string
+
+		// DryRunStrategy by default false, can be set to either "client" or "server" dry-run modes, see kubectl apply --help
+		DryRunStrategy kcmdutil.DryRunStrategy
+	}
 )
 
 func NewConfig() *Config {
@@ -79,6 +87,10 @@ func NewForConfig(ctx context.Context, cfg *Config) Client {
 
 func (c *client) Apply(ctx context.Context, opts *ApplyOptions) error {
 	return c.apply(ctx, opts)
+}
+
+func (c *client) Delete(ctx context.Context, opts *DeleteOptions) error {
+	return c.delete(ctx, opts)
 }
 
 func (c *client) Wait(ctx context.Context, opts *WaitOptions) error {

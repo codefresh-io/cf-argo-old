@@ -16,6 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/kubectl/pkg/cmd/apply"
+
+	kdelete "k8s.io/kubectl/pkg/cmd/delete"
 	kcmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
 
@@ -86,6 +88,8 @@ func (c *client) apply(ctx context.Context, opts *ApplyOptions) error {
 
 			return o.Run()
 		},
+		SilenceErrors: true,
+		SilenceUsage:  true,
 	}
 
 	kcmdutil.AddDryRunFlag(applyCmd)
@@ -99,6 +103,52 @@ func (c *client) apply(ctx context.Context, opts *ApplyOptions) error {
 	applyCmd.SetArgs([]string{})
 
 	return applyCmd.Execute()
+}
+
+func (c *client) delete(ctx context.Context, opts *DeleteOptions) error {
+	if opts == nil {
+		return cferrors.ErrNilOpts
+	}
+
+	if opts.FileName == "" {
+		return errors.New("no filename")
+	}
+
+	ios := genericclioptions.IOStreams{
+		In:     os.Stdin,
+		Out:    os.Stdout,
+		ErrOut: os.Stderr,
+	}
+
+	deleteFlags := kdelete.NewDeleteCommandFlags("containing the resource to delete.")
+	deleteCmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete resources by filenames, stdin, resources and names, or by resources and label selector",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			o, err := deleteFlags.ToOptions(nil, ios)
+			if err != nil {
+				return err
+			}
+
+			o.DryRunStrategy = opts.DryRunStrategy
+			o.Filenames = []string{opts.FileName}
+			o.Filenames = []string{opts.FileName}
+			err = o.Complete(c, args, cmd)
+			if err != nil {
+				return err
+			}
+
+			return o.RunDelete(c)
+		},
+		SilenceErrors: true,
+		SilenceUsage:  true,
+	}
+
+	deleteFlags.AddFlags(deleteCmd)
+	kcmdutil.AddDryRunFlag(deleteCmd)
+	deleteCmd.SetArgs([]string{})
+
+	return deleteCmd.Execute()
 }
 
 func (c *client) wait(ctx context.Context, opts *WaitOptions) error {
