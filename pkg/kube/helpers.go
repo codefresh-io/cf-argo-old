@@ -132,7 +132,7 @@ func (c *client) delete(ctx context.Context, opts *DeleteOptions) error {
 
 			o.DryRunStrategy = opts.DryRunStrategy
 			o.Filenames = []string{opts.FileName}
-			o.Filenames = []string{opts.FileName}
+			o.WaitForDeletion = true
 			err = o.Complete(c, args, cmd)
 			if err != nil {
 				return err
