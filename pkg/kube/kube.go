@@ -57,7 +57,7 @@ type (
 		FileName string
 
 		// DryRunStrategy by default false, can be set to either "client" or "server" dry-run modes, see kubectl apply --help
-		DryRunStrategy kcmdutil.DryRunStrategy
+		DryRun bool
 	}
 )
 

@@ -10,7 +10,6 @@ import (
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"k8s.io/kubectl/pkg/cmd/util"
 )
 
 type options struct {
@@ -72,12 +71,8 @@ func uninstall(ctx context.Context, opts *options) error {
 }
 
 func delete(ctx context.Context, opts *options, filename string) error {
-	d := util.DryRunNone
-	if opts.dryRun {
-		d = util.DryRunClient
-	}
 	return store.Get().NewKubeClient(ctx).Delete(ctx, &kube.DeleteOptions{
-		FileName:       filename,
-		DryRunStrategy: d,
+		FileName: filename,
+		DryRun:   opts.dryRun,
 	})
 }

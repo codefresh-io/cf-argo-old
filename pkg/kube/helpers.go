@@ -130,7 +130,11 @@ func (c *client) delete(ctx context.Context, opts *DeleteOptions) error {
 				return err
 			}
 
-			o.DryRunStrategy = opts.DryRunStrategy
+			if opts.DryRun {
+				o.DryRunStrategy = kcmdutil.DryRunClient
+				o.Output = "yaml"
+			}
+
 			o.Filenames = []string{opts.FileName}
 			o.WaitForDeletion = true
 			err = o.Complete(c, args, cmd)
