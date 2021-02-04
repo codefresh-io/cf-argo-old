@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 
 	cferrors "github.com/codefresh-io/cf-argo/pkg/errors"
@@ -23,6 +24,11 @@ func (c *Client) apply(ctx context.Context, opts *ApplyOptions) error {
 
 	if opts.Manifests == nil {
 		return errors.New("no manifests")
+	}
+
+	if opts.DryRunStrategy != kcmdutil.DryRunNone {
+		fmt.Println(string(opts.Manifests))
+		return nil
 	}
 
 	applyWithTrack := ""
@@ -90,6 +96,10 @@ func (c *Client) apply(ctx context.Context, opts *ApplyOptions) error {
 }
 
 func (c *Client) wait(ctx context.Context, opts *WaitOptions) error {
+	if opts.DryRun {
+		log.G(ctx).Debug("running in dry run mode, no wait")
+		return nil
+	}
 	cs, err := c.KubernetesClientSet()
 	if err != nil {
 		return err

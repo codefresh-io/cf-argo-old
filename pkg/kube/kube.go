@@ -41,6 +41,7 @@ type (
 		Interval  time.Duration
 		Timeout   time.Duration
 		Resources []*ResourceInfo
+		DryRun    bool
 	}
 
 	ApplyOptions struct {
