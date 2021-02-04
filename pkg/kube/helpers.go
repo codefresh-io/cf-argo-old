@@ -3,7 +3,7 @@ package kube
 import (
 	"context"
 	"errors"
-	"fmt"
+	// "fmt"
 	"os"
 
 	cferrors "github.com/codefresh-io/cf-argo/pkg/errors"
@@ -24,11 +24,6 @@ func (c *Client) apply(ctx context.Context, opts *ApplyOptions) error {
 
 	if opts.Manifests == nil {
 		return errors.New("no manifests")
-	}
-
-	if opts.DryRunStrategy != kcmdutil.DryRunNone {
-		fmt.Println(string(opts.Manifests))
-		return nil
 	}
 
 	applyWithTrack := ""
@@ -60,7 +55,6 @@ func (c *Client) apply(ctx context.Context, opts *ApplyOptions) error {
 				"batch/v1beta1/CronJob",
 				// "networking/v1/Ingress",
 			}
-			o.DryRunStrategy = opts.DryRunStrategy
 
 			if o.Namespace != "" {
 				o.EnforceNamespace = true
@@ -70,6 +64,11 @@ func (c *Client) apply(ctx context.Context, opts *ApplyOptions) error {
 			if err != nil {
 				return err
 			}
+			if opts.DryRun {
+				o.DryRunStrategy = kcmdutil.DryRunClient
+				outputFromat := "yaml"
+				o.PrintFlags.OutputFormat = &outputFromat
+			}			
 
 			fake := fakeio.StdinBytes([]byte{})
 			defer fake.Restore()

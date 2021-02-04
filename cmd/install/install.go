@@ -23,7 +23,6 @@ import (
 	"github.com/spf13/viper"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/kustomize/api/filesys"
 	"sigs.k8s.io/kustomize/api/krusty"
 )
@@ -141,27 +140,24 @@ func install(ctx context.Context, opts *options) error {
 	if err != nil {
 		return err
 	}
-
-	passwd, err := getArgocdPassword(ctx, opts)
-	if err != nil {
-		return err
+	if opts.dryRun {
+		return nil
 	}
-	if !opts.dryRun {
+		passwd, err := getArgocdPassword(ctx, opts)
+		if err != nil {
+			return err
+		}
+
 		fmt.Printf("\n\nargocd initialized. password: %s\n", passwd)
 		fmt.Printf("run: kubectl port-forward -n %s svc/argocd-server 8080:80\n\n", values.Namespace)
-	}
 
 	return nil
 }
 
 func apply(ctx context.Context, opts *options, data []byte) error {
-	d := util.DryRunNone
-	if opts.dryRun {
-		d = util.DryRunClient
-	}
 	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
 		Manifests:      data,
-		DryRunStrategy: d,
+		DryRun: opts.dryRun,
 	})
 }
 
@@ -196,9 +192,6 @@ func waitForDeployments(ctx context.Context, opts *options) error {
 }
 
 func getArgocdPassword(ctx context.Context, opts *options) (string, error) {
-	if opts.dryRun {
-		return "", nil
-	}
 	cs, err := store.Get().NewKubeClient(ctx).KubernetesClientSet()
 	if err != nil {
 		return "", err
@@ -230,15 +223,7 @@ func createArgocdApp(ctx context.Context, opts *options) error {
 
 func createSealedSecret(ctx context.Context, opts *options) error {
 	secretPath := filepath.Join(values.RepoName, "secret.yaml")
-	if opts.dryRun {
-		bytes, err := ioutil.ReadFile(secretPath)
-		if err != nil {
-			return err
-		}
-		fmt.Println(string(bytes))
-		return nil
-	}
-	s, err := ss.CreateSealedSecretFromSecretFile(ctx, values.Namespace, secretPath)
+	s, err := ss.CreateSealedSecretFromSecretFile(ctx, values.Namespace, secretPath, opts.dryRun)
 	if err != nil {
 		return err
 	}
@@ -269,13 +254,9 @@ func createSealedSecret(ctx context.Context, opts *options) error {
 }
 
 func applyBootstrapResources(ctx context.Context, manifests []byte, opts *options) error {
-	d := util.DryRunNone
-	if opts.dryRun {
-		d = util.DryRunClient
-	}
 	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
 		Manifests:      manifests,
-		DryRunStrategy: d,
+		DryRun: opts.dryRun,
 	})
 }
 
