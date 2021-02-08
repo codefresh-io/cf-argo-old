@@ -3,7 +3,10 @@ package git
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
+	"strings"
 
 	cferrors "github.com/codefresh-io/cf-argo/pkg/errors"
 	"github.com/codefresh-io/cf-argo/pkg/log"
@@ -32,7 +35,12 @@ type (
 		// CreateRepository creates the repository in the remote provider and returns a
 		// clone url
 		CreateRepository(ctx context.Context, opts *CreateRepositoryOptions) (string, error)
+
 		Clone(ctx context.Context, opts *CloneOptions) (Repository, error)
+
+		// GetRepository tries to get the repository returns the clone url if exists or
+		// ErrRepoNotFound if the repo does not exist
+		GetRepository(ctx context.Context, opts *GetRepositoryOptions) (string, error)
 	}
 
 	// Options for a new git provider
@@ -54,8 +62,6 @@ type (
 		// Path where to clone to
 		Path string
 		Auth *Auth
-		// Bare if true will not include .git directory
-		Bare bool
 	}
 
 	PushOptions struct {
@@ -69,6 +75,11 @@ type (
 		Private bool
 	}
 
+	GetRepositoryOptions struct {
+		Owner string
+		Name  string
+	}
+
 	repo struct {
 		r *gg.Repository
 	}
@@ -77,6 +88,7 @@ type (
 // Errors
 var (
 	ErrProviderNotSupported = errors.New("git provider not supported")
+	ErrRepoNotFound         = errors.New("git repository not found")
 )
 
 // New creates a new git provider
@@ -87,6 +99,27 @@ func New(opts *Options) (Provider, error) {
 	default:
 		return nil, ErrProviderNotSupported
 	}
+}
+
+func SplitCloneURL(cloneURL string) (owner string, repo string, err error) {
+	u, err := url.Parse(cloneURL)
+	if err != nil {
+		return "", "", err
+	}
+
+	switch u.Scheme {
+	case "https", "http", "ssh":
+		parts := strings.Split(u.Path, "/")
+		if len(parts) < 3 {
+			return "", "", fmt.Errorf("malformed repository url")
+		}
+		owner = parts[1]
+		repo = parts[2]
+	default:
+		return "", "", fmt.Errorf("unsupported scheme in clone url \"%s\"", u.Scheme)
+	}
+
+	return
 }
 
 func Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
@@ -111,7 +144,7 @@ func Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
 		return nil, err
 	}
 
-	r, err := gg.PlainCloneContext(ctx, opts.Path, opts.Bare, cloneOpts)
+	r, err := gg.PlainCloneContext(ctx, opts.Path, false, cloneOpts)
 	if err != nil {
 		return nil, err
 	}

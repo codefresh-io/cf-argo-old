@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -16,6 +17,20 @@ import (
 const (
 	envNamePlaceholder = "envName"
 )
+
+func ContextWithCancelOnSignals(ctx context.Context, sigs ...os.Signal) context.Context {
+	ctx, cancel := context.WithCancel(ctx)
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, sigs...)
+
+	go func() {
+		s := <-sig
+		log.G(ctx).Debugf("got signal: %s", s)
+		cancel()
+	}()
+
+	return ctx
+}
 
 func CopyDir(source, destination string) error {
 	return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
@@ -63,7 +78,7 @@ func RenderDirRecurse(pattern string, values interface{}) error {
 }
 
 // TODO maybe there is a more efficient way to do this
-func RenameEnvNameRecurse(ctx context.Context, path, env string) error {
+func RenameFilesWithEnvName(ctx context.Context, path, env string) error {
 	matches, err := filepathx.Glob(filepath.Join(path, fmt.Sprintf("**/%s", envNamePlaceholder)))
 	if err != nil {
 		return err

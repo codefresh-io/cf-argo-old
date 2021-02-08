@@ -3,8 +3,10 @@ package kube
 import (
 	"context"
 	"errors"
+
 	// "fmt"
 	"os"
+	"time"
 
 	cferrors "github.com/codefresh-io/cf-argo/pkg/errors"
 	"github.com/codefresh-io/cf-argo/pkg/log"
@@ -17,7 +19,12 @@ import (
 	kcmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
 
-func (c *Client) apply(ctx context.Context, opts *ApplyOptions) error {
+const (
+	defaultPollInterval = time.Second * 2
+	defaultPollTimeout  = time.Second * 5
+)
+
+func (c *client) apply(ctx context.Context, opts *ApplyOptions) error {
 	if opts == nil {
 		return cferrors.ErrNilOpts
 	}
@@ -68,7 +75,7 @@ func (c *Client) apply(ctx context.Context, opts *ApplyOptions) error {
 				o.DryRunStrategy = kcmdutil.DryRunClient
 				outputFromat := "yaml"
 				o.PrintFlags.OutputFormat = &outputFromat
-			}			
+			}
 
 			fake := fakeio.StdinBytes([]byte{})
 			defer fake.Restore()
@@ -94,7 +101,7 @@ func (c *Client) apply(ctx context.Context, opts *ApplyOptions) error {
 	return applyCmd.Execute()
 }
 
-func (c *Client) wait(ctx context.Context, opts *WaitOptions) error {
+func (c *client) wait(ctx context.Context, opts *WaitOptions) error {
 	if opts.DryRun {
 		log.G(ctx).Debug("running in dry run mode, no wait")
 		return nil
