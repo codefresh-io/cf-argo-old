@@ -59,7 +59,7 @@ func (c *Config) AddEnvironmentP(name string, env Environment) error {
 
 	c.Environments[name] = env
 
-	return nil
+	return c.Persist()
 }
 
 // DeleteEnvironmentP deletes an environment and persists the config object

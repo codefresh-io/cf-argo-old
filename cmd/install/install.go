@@ -176,7 +176,7 @@ func tryCloneGitopsRepo(ctx context.Context, opts *options) {
 	})
 	if err != nil {
 		if err != git.ErrRepoNotFound {
-			return
+			panic(err)
 		}
 
 		// use the template repo to init the new repo
