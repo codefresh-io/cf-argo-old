@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 	"time"
 
@@ -99,19 +100,19 @@ func fillValues(opts *options) {
 func install(ctx context.Context, opts *options) {
 	defer func() {
 		if err := recover(); err != nil {
-			cleanup(ctx, true, opts)
+			cleanup(ctx, true)
 			panic(err)
 		}
-		cleanup(ctx, false, opts)
+		cleanup(ctx, false)
 	}()
 
 	log.G(ctx).Printf("cloning template repository...")
-	prepareBase(ctx, opts.repoName)
+	prepareBase(ctx)
 
 	tryCloneGitopsRepo(ctx, opts)
 
 	log.G(ctx).Printf("building bootstrap resources...")
-	data := buildBootstrapResources(ctx, opts.repoName)
+	data := buildBootstrapResources(ctx)
 
 	if opts.dryRun {
 		log.G(ctx).Printf(string(data))
@@ -137,7 +138,7 @@ func install(ctx context.Context, opts *options) {
 	log.G(ctx).Printf("run: kubectl port-forward -n %s svc/argocd-server 8080:80", values.Namespace)
 }
 
-func prepareBase(ctx context.Context, path string) {
+func prepareBase(ctx context.Context) {
 	var err error
 	log.G(ctx).Debug("creating temp dir for template repo")
 	values.TemplateRepoClonePath, err = ioutil.TempDir("", "")
@@ -152,13 +153,13 @@ func prepareBase(ctx context.Context, path string) {
 	errors.CheckErr(err)
 
 	log.G(ctx).Debug("cleaning template repository")
-	errors.CheckErr(os.RemoveAll(filepath.Join(path, ".git")))
+	errors.CheckErr(os.RemoveAll(filepath.Join(values.TemplateRepoClonePath, ".git")))
 
 	log.G(ctx).Debug("renaming envName files")
 	errors.CheckErr(helpers.RenameFilesWithEnvName(ctx, values.TemplateRepoClonePath, values.EnvName))
 
 	log.G(ctx).Debug("rendering template values")
-	errors.CheckErr(helpers.RenderDirRecurse(filepath.Join(path, "**/*.*"), values))
+	errors.CheckErr(helpers.RenderDirRecurse(filepath.Join(values.TemplateRepoClonePath, "**/*.*"), values))
 }
 
 func tryCloneGitopsRepo(ctx context.Context, opts *options) {
@@ -304,12 +305,12 @@ func applyBootstrapResources(ctx context.Context, manifests []byte, opts *option
 	})
 }
 
-func buildBootstrapResources(ctx context.Context, path string) []byte {
+func buildBootstrapResources(ctx context.Context) []byte {
 	opts := krusty.MakeDefaultOptions()
 	opts.DoLegacyResourceSort = true
 
 	k := krusty.MakeKustomizer(filesys.MakeFsOnDisk(), opts)
-	res, err := k.Run(path)
+	res, err := k.Run(values.TemplateRepoClonePath)
 	errors.CheckErr(err)
 
 	data, err := res.AsYaml()
@@ -361,12 +362,12 @@ func initializeNewGitopsRepo(ctx context.Context, opts *options) {
 
 	// create new config
 	config := envman.NewConfig(values.GitopsRepoClonePath)
-	config.AddEnvironmentP(values.EnvName, envman.Environment{
+	errors.CheckErr(config.AddEnvironmentP(values.EnvName, envman.Environment{
 		RootApplicationPath: filepath.Join(
 			values.ArgoAppsDir,
 			fmt.Sprintf("%s.yaml", values.EnvName),
 		),
-	})
+	}))
 
 	log.G(ctx).Printf("creating gitops repository: %s/%s...", opts.repoOwner, opts.repoName)
 	cloneURL, err := createRemoteRepo(ctx, opts)
@@ -379,6 +380,15 @@ func addToExistingGitopsRepo(ctx context.Context, opts *options) {
 	config, err := envman.LoadConfig(values.GitopsRepoClonePath)
 	errors.CheckErr(err)
 
+	if len(config.Environments) == 0 {
+		panic(fmt.Errorf("existing repo with no environments"))
+	}
+
+	e := config.Environments["production"]
+	app, err := e.GetAppByName("argo-cd")
+
+	log.G(ctx).Printf(app.Name)
+	os.Exit(0)
 }
 
 func createRemoteRepo(ctx context.Context, opts *options) (string, error) {
@@ -404,11 +414,12 @@ func createRemoteRepo(ctx context.Context, opts *options) (string, error) {
 	return cloneURL, err
 }
 
-func cleanup(ctx context.Context, failed bool, opts *options) {
-	if failed || opts.dryRun {
-		log.G(ctx).Debugf("cleaning local user repo: %s", opts.repoName)
-		if err := os.RemoveAll(opts.repoName); err != nil && !os.IsNotExist(err) {
-			log.G(ctx).WithError(err).Error("failed to clean user local repo")
-		}
+func cleanup(ctx context.Context, failed bool) {
+	log.G(ctx).Debugf("cleaning dirs: %s", strings.Join([]string{values.GitopsRepoClonePath, values.TemplateRepoClonePath}, ","))
+	if err := os.RemoveAll(values.GitopsRepoClonePath); err != nil && !os.IsNotExist(err) {
+		log.G(ctx).WithError(err).Error("failed to clean user local repo")
+	}
+	if err := os.RemoveAll(values.TemplateRepoClonePath); err != nil && !os.IsNotExist(err) {
+		log.G(ctx).WithError(err).Error("failed to clean template repo")
 	}
 }
