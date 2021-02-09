@@ -21,6 +21,7 @@ import (
 	"github.com/codefresh-io/cf-argo/pkg/log"
 	ss "github.com/codefresh-io/cf-argo/pkg/sealed-secrets"
 	"github.com/codefresh-io/cf-argo/pkg/store"
+	"gopkg.in/yaml.v2"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/kustomize/api/filesys"
 	"sigs.k8s.io/kustomize/api/krusty"
+	kustomize "sigs.k8s.io/kustomize/api/types"
 )
 
 type options struct {
@@ -119,13 +121,15 @@ func install(ctx context.Context, opts *options) {
 		return
 	}
 
-	log.G(ctx).Printf("applying resource to cluster...")
-	errors.CheckErr(applyBootstrapResources(ctx, data, opts))
+	if false {
+		log.G(ctx).Printf("applying resource to cluster...")
+		errors.CheckErr(applyBootstrapResources(ctx, data, opts))
 
-	log.G(ctx).Printf("waiting for argocd initialization to complete... (might take a few seconds)")
-	errors.CheckErr(waitForDeployments(ctx, opts))
+		log.G(ctx).Printf("waiting for argocd initialization to complete... (might take a few seconds)")
+		errors.CheckErr(waitForDeployments(ctx, opts))
 
-	errors.CheckErr(createSealedSecret(ctx, opts))
+		errors.CheckErr(createSealedSecret(ctx, opts))
+	}
 
 	persistGitopsRepo(ctx, opts)
 
@@ -149,6 +153,7 @@ func prepareBase(ctx context.Context) {
 	_, err = git.Clone(ctx, &git.CloneOptions{
 		URL:  store.Get().BaseGitURL,
 		Path: values.TemplateRepoClonePath,
+		Ref:  "tests",
 	})
 	errors.CheckErr(err)
 
@@ -197,6 +202,13 @@ func tryCloneGitopsRepo(ctx context.Context, opts *options) {
 		Path: values.GitopsRepoClonePath,
 	})
 	errors.CheckErr(err)
+
+	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
+	errors.CheckErr(err)
+
+	if _, exists := conf.Environments[values.EnvName]; exists {
+		panic(fmt.Errorf("environment with name \"%s\" already exists in target repository", values.EnvName))
+	}
 }
 
 func apply(ctx context.Context, opts *options, data []byte) error {
@@ -362,7 +374,7 @@ func initializeNewGitopsRepo(ctx context.Context, opts *options) {
 
 	// create new config
 	config := envman.NewConfig(values.GitopsRepoClonePath)
-	errors.CheckErr(config.AddEnvironmentP(values.EnvName, envman.Environment{
+	errors.CheckErr(config.AddEnvironmentP(values.EnvName, &envman.Environment{
 		RootApplicationPath: filepath.Join(
 			values.ArgoAppsDir,
 			fmt.Sprintf("%s.yaml", values.EnvName),
@@ -377,17 +389,56 @@ func initializeNewGitopsRepo(ctx context.Context, opts *options) {
 }
 
 func addToExistingGitopsRepo(ctx context.Context, opts *options) {
-	config, err := envman.LoadConfig(values.GitopsRepoClonePath)
+	tplConf, err := envman.LoadConfig(values.TemplateRepoClonePath)
 	errors.CheckErr(err)
 
-	if len(config.Environments) == 0 {
-		panic(fmt.Errorf("existing repo with no environments"))
+	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
+	errors.CheckErr(err)
+
+	if len(conf.Environments) == 0 {
+		panic(fmt.Errorf("existing repo has no environments in config file"))
 	}
 
-	e := config.Environments["production"]
-	app, err := e.GetAppByName("argo-cd")
+	tplEnv := tplConf.FirstEnv()
 
-	log.G(ctx).Printf(app.Name)
+	// we use the current first env as a reference to how the new env should be added
+	refEnv := conf.FirstEnv()
+
+	// get all of the argocd apps we want to copy to the existing repo
+	la, err := tplEnv.LeafApps()
+	errors.CheckErr(err)
+
+	for _, tplApp := range la {
+		refApp, err := refEnv.GetAppByName(envman.GetAppCfName(tplApp))
+		errors.CheckErr(err)
+
+		refSrcPath := refApp.Spec.Source.Path
+		refKust := filepath.Join(values.GitopsRepoClonePath, refSrcPath, "kustomization.yaml")
+		bytes, err := ioutil.ReadFile(refKust)
+		errors.CheckErr(err)
+
+		k := &kustomize.Kustomization{}
+		errors.CheckErr(yaml.Unmarshal(bytes, k))
+
+		oldRelPath := tplApp.Spec.Source.Path
+		src := filepath.Join(values.TemplateRepoClonePath, oldRelPath)
+
+		newRelPath := filepath.Clean(filepath.Join(refSrcPath, k.Resources[0], "../overlays", values.EnvName))
+		dst := filepath.Join(values.GitopsRepoClonePath, newRelPath)
+
+		errors.CheckErr(os.Rename(src, dst))
+		log.G(ctx).Debugf("moving %s to %s", src, dst)
+
+		tplApp.Spec.Source.Path = newRelPath
+		errors.CheckErr(tplApp.Save())
+	}
+
+	// app, err := e.GetAppByName("argo-cd")
+
+	// kpath := filepath.Join(values.GitopsRepoClonePath, app.Spec.Source.Path, "kustomization.yaml")
+	// bytes, err := ioutil.ReadFile(kpath)
+	// errors.CheckErr(err)
+
 	os.Exit(0)
 }
 

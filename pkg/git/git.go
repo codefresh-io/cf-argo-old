@@ -14,6 +14,7 @@ import (
 	"github.com/go-git/go-git/plumbing/transport"
 	gg "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
@@ -62,6 +63,7 @@ type (
 		// Path where to clone to
 		Path string
 		Auth *Auth
+		Ref  string
 	}
 
 	PushOptions struct {
@@ -139,6 +141,11 @@ func Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
 		Auth:     auth,
 		Progress: os.Stderr,
 	}
+
+	if opts.Ref != "" {
+		cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(opts.Ref)
+	}
+
 	err := cloneOpts.Validate()
 	if err != nil {
 		return nil, err
