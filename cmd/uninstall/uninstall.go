@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/codefresh-io/cf-argo/pkg/errors"
+	"github.com/codefresh-io/cf-argo/pkg/helpers"
 	"github.com/codefresh-io/cf-argo/pkg/kube"
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	"github.com/spf13/cobra"
@@ -65,8 +66,14 @@ func fillValues(opts *options) {
 }
 
 func uninstall(ctx context.Context, opts *options) error {
-	rootPath := filepath.Join(values.RepoName, values.ArgoAppsDir, fmt.Sprintf("%s.yaml", values.EnvName))
-	err := delete(ctx, opts, rootPath)
+	// rootPath := filepath.Join(values.RepoName, values.ArgoAppsDir, fmt.Sprintf("%s.yaml", values.EnvName))
+	// err := delete(ctx, opts, rootPath)
+	// return err
+	err := clearOverlays(ctx)
+	if err != nil {
+		return err
+	}
+
 	return err
 }
 
@@ -75,4 +82,25 @@ func delete(ctx context.Context, opts *options, filename string) error {
 		FileName: filename,
 		DryRun:   opts.dryRun,
 	})
+}
+
+func clearOverlays(ctx context.Context) error {
+	pattern := fmt.Sprintf("kustomize/*/*/overlays/%s", values.EnvName)
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return err
+	}
+
+	for _, m := range matches {
+		if m == fmt.Sprintf("kustomize/components/argo-cd/overlays/%s", values.EnvName) {
+			continue
+		}
+
+		err = helpers.ClearFolder(ctx, m)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

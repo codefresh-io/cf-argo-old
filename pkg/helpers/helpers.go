@@ -146,3 +146,36 @@ func renameEnvName(ctx context.Context, old, env string) error {
 
 	return os.Rename(ap, newName)
 }
+
+func ClearFolder(ctx context.Context, path string) error {
+	err := removeContents(path)
+	if err != nil {
+		return err
+	}
+
+	_, err = os.Create(filepath.Join(path, "DUMMY"))
+	if err != nil {
+		return err
+	}
+
+	log.G(ctx).WithFields(log.Fields{
+		"path": path,
+	}).Debug("cleared folder")
+	return nil
+}
+
+func removeContents(dir string) error {
+	files, err := filepath.Glob(filepath.Join(dir, "*"))
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		err = os.RemoveAll(file)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
