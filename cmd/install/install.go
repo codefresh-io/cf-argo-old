@@ -108,32 +108,25 @@ func install(ctx context.Context, opts *options) {
 		cleanup(ctx, false)
 	}()
 
+	tryCloneExistingRepo(ctx, opts)
+
 	log.G(ctx).Printf("cloning template repository...")
 	prepareBase(ctx)
 
-	tryCloneGitopsRepo(ctx, opts)
-
 	log.G(ctx).Printf("building bootstrap resources...")
-	data := buildBootstrapResources(ctx)
-
+	installBootstrapResources(ctx, opts)
 	if opts.dryRun {
-		log.G(ctx).Printf(string(data))
 		return
 	}
 
-	if false {
-		log.G(ctx).Printf("applying resource to cluster...")
-		errors.CheckErr(applyBootstrapResources(ctx, data, opts))
+	log.G(ctx).Printf("waiting for argocd initialization to complete... (might take a few seconds)")
+	errors.CheckErr(waitForDeployments(ctx, opts))
 
-		log.G(ctx).Printf("waiting for argocd initialization to complete... (might take a few seconds)")
-		errors.CheckErr(waitForDeployments(ctx, opts))
-
-		errors.CheckErr(createSealedSecret(ctx, opts))
-	}
-
-	persistGitopsRepo(ctx, opts)
+	errors.CheckErr(createSealedSecret(ctx, opts))
 
 	errors.CheckErr(createArgocdApp(ctx, opts))
+
+	persistGitopsRepo(ctx, opts)
 
 	passwd, err := getArgocdPassword(ctx, opts)
 	errors.CheckErr(err)
@@ -167,7 +160,7 @@ func prepareBase(ctx context.Context) {
 	errors.CheckErr(helpers.RenderDirRecurse(filepath.Join(values.TemplateRepoClonePath, "**/*.*"), values))
 }
 
-func tryCloneGitopsRepo(ctx context.Context, opts *options) {
+func tryCloneExistingRepo(ctx context.Context, opts *options) {
 	p, err := git.New(&git.Options{
 		Type: "github", // only option for now
 		Auth: &git.Auth{
@@ -266,20 +259,23 @@ func getArgocdPassword(ctx context.Context, opts *options) (string, error) {
 }
 
 func createArgocdApp(ctx context.Context, opts *options) error {
-	data, err := ioutil.ReadFile(filepath.Join(
-		values.RepoName,
-		values.ArgoAppsDir,
-		fmt.Sprintf("%s.yaml", values.EnvName),
-	))
-	if err != nil {
-		return err
-	}
+	tplConf, err := envman.LoadConfig(values.TemplateRepoClonePath)
+	errors.CheckErr(err)
+	absArgoAppsDir := filepath.Join(values.TemplateRepoClonePath, filepath.Dir(tplConf.FirstEnv().RootApplicationPath))
 
-	return apply(ctx, opts, data)
+	projData, err := ioutil.ReadFile(filepath.Join(absArgoAppsDir, fmt.Sprintf("%s-project.yaml", values.EnvName)))
+	errors.CheckErr(err)
+
+	appData, err := ioutil.ReadFile(filepath.Join(absArgoAppsDir, fmt.Sprintf("%s.yaml", values.EnvName)))
+	errors.CheckErr(err)
+
+	manifests := []byte(fmt.Sprintf("%s\n\n---\n%s", string(projData), string(appData)))
+
+	return apply(ctx, opts, manifests)
 }
 
 func createSealedSecret(ctx context.Context, opts *options) error {
-	secretPath := filepath.Join(values.RepoName, "secret.yaml")
+	secretPath := filepath.Join(values.TemplateRepoClonePath, "secret.yaml")
 	s, err := ss.CreateSealedSecretFromSecretFile(ctx, values.Namespace, secretPath, opts.dryRun)
 	if err != nil {
 		return err
@@ -297,7 +293,7 @@ func createSealedSecret(ctx context.Context, opts *options) error {
 
 	return ioutil.WriteFile(
 		filepath.Join(
-			values.RepoName,
+			values.TemplateRepoClonePath,
 			"kustomize",
 			"components",
 			"argo-cd",
@@ -310,18 +306,11 @@ func createSealedSecret(ctx context.Context, opts *options) error {
 	)
 }
 
-func applyBootstrapResources(ctx context.Context, manifests []byte, opts *options) error {
-	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
-		Manifests: manifests,
-		DryRun:    opts.dryRun,
-	})
-}
+func installBootstrapResources(ctx context.Context, opts *options) {
+	kopts := krusty.MakeDefaultOptions()
+	kopts.DoLegacyResourceSort = true
 
-func buildBootstrapResources(ctx context.Context) []byte {
-	opts := krusty.MakeDefaultOptions()
-	opts.DoLegacyResourceSort = true
-
-	k := krusty.MakeKustomizer(filesys.MakeFsOnDisk(), opts)
+	k := krusty.MakeKustomizer(filesys.MakeFsOnDisk(), kopts)
 	res, err := k.Run(values.TemplateRepoClonePath)
 	errors.CheckErr(err)
 
@@ -335,7 +324,9 @@ func buildBootstrapResources(ctx context.Context) []byte {
 
 	errors.CheckErr(tpl.Execute(buf, values))
 
-	return buf.Bytes()
+	manifests := buf.Bytes()
+
+	apply(ctx, opts, manifests)
 }
 
 func persistGitopsRepo(ctx context.Context, opts *options) {
@@ -409,8 +400,8 @@ func addToExistingGitopsRepo(ctx context.Context, opts *options) {
 	errors.CheckErr(err)
 
 	for _, tplApp := range la {
-		refApp, err := refEnv.GetAppByName(envman.GetAppCfName(tplApp))
-		errors.CheckErr(err)
+		refApp, err := refEnv.GetAppByName(tplApp.CfName())
+		errors.CheckErr(err) // TODO handle new app in tpl
 
 		refSrcPath := refApp.Spec.Source.Path
 		refKust := filepath.Join(values.GitopsRepoClonePath, refSrcPath, "kustomization.yaml")
@@ -433,13 +424,8 @@ func addToExistingGitopsRepo(ctx context.Context, opts *options) {
 		errors.CheckErr(tplApp.Save())
 	}
 
-	// app, err := e.GetAppByName("argo-cd")
-
-	// kpath := filepath.Join(values.GitopsRepoClonePath, app.Spec.Source.Path, "kustomization.yaml")
-	// bytes, err := ioutil.ReadFile(kpath)
-	// errors.CheckErr(err)
-
-	os.Exit(0)
+	log.G(ctx).Printf("saving new environment: %s", values.EnvName)
+	errors.CheckErr(conf.AddEnvironmentP(values.EnvName, tplEnv))
 }
 
 func createRemoteRepo(ctx context.Context, opts *options) (string, error) {

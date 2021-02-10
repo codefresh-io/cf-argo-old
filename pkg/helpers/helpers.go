@@ -94,7 +94,7 @@ func RenameFilesWithEnvName(ctx context.Context, path, env string) error {
 	}
 
 	// run again to rename nested files with envName
-	matches, err = filepathx.Glob(filepath.Join(path, fmt.Sprintf("**/%s.*", envNamePlaceholder)))
+	matches, err = filepathx.Glob(filepath.Join(path, fmt.Sprintf("**/%s*.*", envNamePlaceholder)))
 	if err != nil {
 		return err
 	}

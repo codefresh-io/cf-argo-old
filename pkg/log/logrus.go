@@ -30,8 +30,8 @@ type logrusAdapter struct {
 	c *LogrusConfig
 }
 
-func FromLogrus(l *logrus.Logger, c *LogrusConfig) Logger {
-	return &logrusAdapter{logrus.NewEntry(l), c}
+func FromLogrus(l *logrus.Entry, c *LogrusConfig) Logger {
+	return &logrusAdapter{l, c}
 }
 
 func (l *logrusAdapter) AddPFlags(cmd *cobra.Command) {
@@ -61,15 +61,15 @@ func (l *logrusAdapter) Printf(format string, args ...interface{}) {
 }
 
 func (l *logrusAdapter) WithField(key string, val interface{}) Logger {
-	return FromLogrus(l.Entry.WithField(key, val).Logger, l.c)
+	return FromLogrus(l.Entry.WithField(key, val), l.c)
 }
 
 func (l *logrusAdapter) WithFields(fields Fields) Logger {
-	return FromLogrus(l.Entry.WithFields(logrus.Fields(fields)).Logger, l.c)
+	return FromLogrus(l.Entry.WithFields(logrus.Fields(fields)), l.c)
 }
 
 func (l *logrusAdapter) WithError(err error) Logger {
-	return FromLogrus(l.Entry.WithError(err).Logger, l.c)
+	return FromLogrus(l.Entry.WithError(err), l.c)
 }
 
 func (l *logrusAdapter) configure(f *pflag.FlagSet) error {

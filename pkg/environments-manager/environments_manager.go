@@ -22,6 +22,10 @@ var (
 	ErrEnvironmentNotExist      = errors.New("environment does not exist")
 
 	yamlSeparator = regexp.MustCompile(`\n---`)
+
+	rootAppName       = "root"
+	componentsAppName = "components"
+	entitiesAppName   = "entities"
 )
 
 const (
@@ -68,8 +72,15 @@ func (c *Config) Persist() error {
 	return ioutil.WriteFile(filepath.Join(c.path, configFileName), data, 0644)
 }
 
-// AddEnvironmentP adds a new environment and persists the config object
+// AddEnvironmentP adds a new environment, copies all of the argocd apps to the relative
+// location in the repository that c is managing, and persists the config object
 func (c *Config) AddEnvironmentP(name string, env *Environment) error {
+	// copy all of the argocd apps to the correct location in the destination repo
+	if err := c.copyEnv(name, env); err != nil {
+		return err
+	}
+
+	// add new env to config file
 	if _, exists := c.Environments[name]; exists {
 		return ErrEnvironmentAlreadyExists
 	}
@@ -78,6 +89,48 @@ func (c *Config) AddEnvironmentP(name string, env *Environment) error {
 	c.Environments[name] = env
 
 	return c.Persist()
+}
+
+func (c *Config) copyEnv(envName string, env *Environment) error {
+	destArgoAppsDir := ""
+	srcArgoAppsDir := filepath.Dir(env.RootApplicationPath)
+
+	if len(c.Environments) != 0 {
+		destArgoAppsDir = filepath.Dir(c.FirstEnv().RootApplicationPath)
+	} else {
+		destArgoAppsDir = filepath.Dir(env.RootApplicationPath)
+	}
+
+	if err := env.moveApp(componentsAppName, filepath.Join(destArgoAppsDir, envName, componentsAppName)); err != nil {
+		return err
+	}
+	if err := env.moveApp(entitiesAppName, filepath.Join(destArgoAppsDir, envName, entitiesAppName)); err != nil {
+		return err
+	}
+	if err := env.moveApp(rootAppName, filepath.Join(destArgoAppsDir, envName)); err != nil {
+		return err
+	}
+
+	copyFiles := []string{fmt.Sprintf("%s.yaml", envName), fmt.Sprintf("%s-project.yaml", envName), envName}
+	for _, fn := range copyFiles {
+		if err := os.Rename(filepath.Join(env.c.path, srcArgoAppsDir, fn), filepath.Join(c.path, destArgoAppsDir, fn)); err != nil {
+			return err
+		}
+	}
+
+	env.RootApplicationPath = fmt.Sprintf("./%s/%s.yaml", destArgoAppsDir, envName)
+
+	return nil
+}
+
+func (e *Environment) moveApp(appName, dst string) error {
+	app, err := e.GetAppByName(appName)
+	if err != nil {
+		return err
+	}
+	app.SetSrcPath(dst)
+
+	return app.Save()
 }
 
 // DeleteEnvironmentP deletes an environment and persists the config object
@@ -175,13 +228,13 @@ func (e *Environment) GetAppByName(appName string) (*Application, error) {
 		return nil, err
 	}
 	if app == nil {
-		return nil, fmt.Errorf("app not found")
+		return nil, fmt.Errorf("app not found: %s", appName)
 	}
 	return app, nil
 }
 
 func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*Application, error) {
-	if GetAppCfName(root) == appName {
+	if root.CfName() == appName {
 		return root, nil
 	}
 
@@ -198,7 +251,7 @@ func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*A
 			continue
 		}
 
-		if getAppManagedBy(app) != "codefresh.io" {
+		if !app.IsManagedBy() {
 			continue
 		}
 
@@ -209,22 +262,6 @@ func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*A
 	}
 
 	return nil, nil
-}
-
-func GetAppCfName(app *Application) string {
-	return getAppLabelValue(app, labelsCfName)
-}
-
-func getAppManagedBy(app *Application) string {
-	return getAppLabelValue(app, labelsManagedBy)
-}
-
-func getAppLabelValue(app *Application, label string) string {
-	if app.Labels == nil {
-		return ""
-	}
-
-	return app.Labels[label]
 }
 
 func getAppFromFile(path string) (*Application, error) {
@@ -254,6 +291,30 @@ func getAppFromFile(path string) (*Application, error) {
 	}
 
 	return nil, nil
+}
+
+func (a *Application) SrcPath() string {
+	return a.Spec.Source.Path
+}
+
+func (a *Application) SetSrcPath(newPath string) {
+	a.Spec.Source.Path = newPath
+}
+
+func (a *Application) CfName() string {
+	return a.labelValue(labelsCfName)
+}
+
+func (a *Application) IsManagedBy() bool {
+	return a.labelValue(labelsManagedBy) == "codefresh.io"
+}
+
+func (a *Application) labelValue(label string) string {
+	if a.Labels == nil {
+		return ""
+	}
+
+	return a.Labels[label]
 }
 
 func (a *Application) Save() error {
