@@ -21,7 +21,7 @@ import (
 	"github.com/codefresh-io/cf-argo/pkg/log"
 	ss "github.com/codefresh-io/cf-argo/pkg/sealed-secrets"
 	"github.com/codefresh-io/cf-argo/pkg/store"
-	"gopkg.in/yaml.v2"
+	"github.com/ghodss/yaml"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

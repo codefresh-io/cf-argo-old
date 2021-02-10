@@ -1,7 +1,6 @@
 package environments_manager
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -11,9 +10,8 @@ import (
 	"strings"
 
 	"github.com/argoproj/argo-cd/pkg/apis/application/v1alpha1"
-	"gopkg.in/yaml.v3"
+	"github.com/ghodss/yaml"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	kyaml "sigs.k8s.io/yaml"
 )
 
 // errors
@@ -275,18 +273,14 @@ func getAppFromFile(path string) (*Application, error) {
 			continue
 		}
 		u := &unstructured.Unstructured{}
-		err := kyaml.Unmarshal([]byte(text), u)
+		err := yaml.Unmarshal([]byte(text), u)
 		if err != nil {
 			return nil, err
 		}
 
 		if u.GetKind() == "Application" {
-			data, err := kyaml.YAMLToJSON([]byte(text))
-			if err != nil {
-				return nil, err
-			}
 			app := &v1alpha1.Application{}
-			return &Application{app, path}, json.Unmarshal(data, app)
+			return &Application{app, path}, yaml.Unmarshal(data, app)
 		}
 	}
 
@@ -318,12 +312,7 @@ func (a *Application) labelValue(label string) string {
 }
 
 func (a *Application) Save() error {
-	json, err := json.Marshal(a)
-	if err != nil {
-		return err
-	}
-
-	data, err := kyaml.JSONToYAML([]byte(json))
+	data, err := yaml.Marshal(a)
 	if err != nil {
 		return err
 	}
