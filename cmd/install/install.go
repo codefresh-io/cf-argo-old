@@ -146,7 +146,7 @@ func prepareBase(ctx context.Context) {
 	_, err = git.Clone(ctx, &git.CloneOptions{
 		URL:  store.Get().BaseGitURL,
 		Path: values.TemplateRepoClonePath,
-		Ref:  "tests",
+		Ref:  "tests", // TODO: change
 	})
 	errors.CheckErr(err)
 
