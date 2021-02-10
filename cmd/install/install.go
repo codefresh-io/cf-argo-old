@@ -42,7 +42,7 @@ type options struct {
 }
 
 var values struct {
-	ArgoAppsDir           string
+	BootstrapDir          string
 	GitToken              string
 	EnvName               string
 	Namespace             string
@@ -91,7 +91,7 @@ func fillValues(opts *options) {
 	opts.repoOwner, opts.repoName, err = git.SplitCloneURL(opts.repoURL)
 	errors.CheckErr(err)
 
-	values.ArgoAppsDir = "argocd-apps"
+	values.BootstrapDir = "bootstrap"
 	values.GitToken = base64.StdEncoding.EncodeToString([]byte(opts.gitToken))
 	values.EnvName = opts.envName
 	values.Namespace = fmt.Sprintf("%s-argocd", values.EnvName)
@@ -178,9 +178,7 @@ func tryCloneExistingRepo(ctx context.Context, opts *options) {
 			panic(err)
 		}
 
-		// use the template repo to init the new repo
-		values.GitopsRepoClonePath = values.TemplateRepoClonePath
-		return
+		return // we will create it later
 	}
 
 	log.G(ctx).Debug("creating temp dir for template repo")
@@ -275,7 +273,7 @@ func createArgocdApp(ctx context.Context, opts *options) error {
 }
 
 func createSealedSecret(ctx context.Context, opts *options) error {
-	secretPath := filepath.Join(values.TemplateRepoClonePath, "secret.yaml")
+	secretPath := filepath.Join(values.TemplateRepoClonePath, values.BootstrapDir, "secret.yaml")
 	s, err := ss.CreateSealedSecretFromSecretFile(ctx, values.Namespace, secretPath, opts.dryRun)
 	if err != nil {
 		return err
@@ -311,7 +309,7 @@ func installBootstrapResources(ctx context.Context, opts *options) {
 	kopts.DoLegacyResourceSort = true
 
 	k := krusty.MakeKustomizer(filesys.MakeFsOnDisk(), kopts)
-	res, err := k.Run(values.TemplateRepoClonePath)
+	res, err := k.Run(filepath.Join(values.TemplateRepoClonePath, values.BootstrapDir))
 	errors.CheckErr(err)
 
 	data, err := res.AsYaml()
@@ -326,7 +324,7 @@ func installBootstrapResources(ctx context.Context, opts *options) {
 
 	manifests := buf.Bytes()
 
-	apply(ctx, opts, manifests)
+	errors.CheckErr(apply(ctx, opts, manifests))
 }
 
 func persistGitopsRepo(ctx context.Context, opts *options) {
@@ -352,25 +350,12 @@ func persistGitopsRepo(ctx context.Context, opts *options) {
 
 func initializeNewGitopsRepo(ctx context.Context, opts *options) {
 	var err error
+	// use the template repo to init the new repo
+	values.GitopsRepoClonePath = values.TemplateRepoClonePath
 	values.GitopsRepo, err = git.Init(ctx, values.GitopsRepoClonePath)
 	errors.CheckErr(err)
 
-	files, err := filepath.Glob(filepath.Join(values.GitopsRepoClonePath, "*.yaml"))
-	errors.CheckErr(err)
-
-	for _, f := range files {
-		log.G(ctx).WithField("path", f).Debug("removing file")
-		errors.CheckErr(os.Remove(f))
-	}
-
-	// create new config
-	config := envman.NewConfig(values.GitopsRepoClonePath)
-	errors.CheckErr(config.AddEnvironmentP(values.EnvName, &envman.Environment{
-		RootApplicationPath: filepath.Join(
-			values.ArgoAppsDir,
-			fmt.Sprintf("%s.yaml", values.EnvName),
-		),
-	}))
+	errors.CheckErr(os.RemoveAll(filepath.Join(values.TemplateRepoClonePath, values.BootstrapDir)))
 
 	log.G(ctx).Printf("creating gitops repository: %s/%s...", opts.repoOwner, opts.repoName)
 	cloneURL, err := createRemoteRepo(ctx, opts)

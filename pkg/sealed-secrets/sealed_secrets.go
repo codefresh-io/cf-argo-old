@@ -9,15 +9,20 @@ import (
 	"io/ioutil"
 
 	"github.com/bitnami-labs/sealed-secrets/pkg/apis/sealed-secrets/v1alpha1"
+	sscheme "github.com/bitnami-labs/sealed-secrets/pkg/client/clientset/versioned/scheme"
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	v1 "k8s.io/api/core/v1"
-	runtimeserializer "k8s.io/apimachinery/pkg/runtime/serializer"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/scheme"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/util/cert"
-	"k8s.io/kubectl/pkg/scheme"
 )
 
 func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath string, dryRun bool) (*v1alpha1.SealedSecret, error) {
+	if err := sscheme.AddToScheme(scheme.Scheme); err != nil {
+		return nil, err
+	}
+
 	s, err := getSecretFromFile(ctx, secretPath)
 	if err != nil {
 		return nil, err
@@ -32,7 +37,17 @@ func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath
 		return nil, err
 	}
 
-	return v1alpha1.NewSealedSecret(runtimeserializer.CodecFactory{}, rsaPub, s)
+	ss, err := v1alpha1.NewSealedSecret(scheme.Codecs, rsaPub, s)
+	if err != nil {
+		return nil, err
+	}
+
+	ss.TypeMeta = metav1.TypeMeta{
+		Kind:       "SealedSecret",
+		APIVersion: v1alpha1.SchemeGroupVersion.String(),
+	}
+
+	return ss, nil
 }
 
 func getSecretFromFile(ctx context.Context, secretPath string) (*v1.Secret, error) {
