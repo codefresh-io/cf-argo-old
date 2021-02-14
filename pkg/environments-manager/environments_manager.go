@@ -83,25 +83,30 @@ func (c *Config) AddEnvironmentP(env *Environment) error {
 		return fmt.Errorf("%w: %s", ErrEnvironmentAlreadyExists, env.name)
 	}
 
+	newEnv, err := c.installEnv(env)
 	// copy all of the argocd apps to the correct location in the destination repo
-	if err := c.installEnv(env); err != nil {
-		return err
-	}
-
-	env.c = c
-	c.Environments[env.name] = env
-	return c.Persist()
-}
-
-func (c *Config) installEnv(env *Environment) error {
-	lapps, err := env.LeafApps()
 	if err != nil {
 		return err
 	}
 
+	c.Environments[env.name] = newEnv
+	return c.Persist()
+}
+
+func (c *Config) installEnv(env *Environment) (*Environment, error) {
+	lapps, err := env.LeafApps()
+	if err != nil {
+		return nil, err
+	}
+
+	newEnv := &Environment{
+		name:                env.name,
+		c:                   c,
+		RootApplicationPath: env.RootApplicationPath,
+	}
 	for _, la := range lapps {
-		if err = env.installApp(c.path, la); err != nil {
-			return err
+		if err = newEnv.installApp(env.c.path, la); err != nil {
+			return nil, err
 		}
 	}
 
@@ -110,10 +115,10 @@ func (c *Config) installEnv(env *Environment) error {
 	dst := filepath.Join(c.path, filepath.Dir(refEnv.RootApplicationPath))
 	err = helpers.CopyDir(src, dst)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return newEnv, nil
 }
 
 func (c *Config) GetAppByName(appName string) (*Application, error) {
@@ -174,16 +179,15 @@ func LoadConfig(path string) (*Config, error) {
 	return c, nil
 }
 
-func (e *Environment) installApp(rootPath string, app *Application) error {
-	refApp, err := e.c.GetAppByName(app.CfName())
+func (e *Environment) installApp(srcConfigPath string, app *Application) error {
+	appName := app.CfName()
+	refApp, err := e.c.GetAppByName(appName)
 	if err != nil {
 		if !errors.Is(err, ErrAppNotFound) {
 			return err
 		}
-		refApp = &Application{
-			path:        app.path,
-			Application: app.DeepCopy(),
-		}
+
+		return e.installNewApp(srcConfigPath, app)
 	}
 
 	baseLocation, err := refApp.getBaseLocation(e.c.path)
@@ -191,10 +195,12 @@ func (e *Environment) installApp(rootPath string, app *Application) error {
 		return err
 	}
 
-	dst := filepath.Clean(filepath.Join(baseLocation, "..", "overlays", e.name))
+	src := app.SrcPath()
+	absSrc := filepath.Join(srcConfigPath, src)
 
-	absSrc := filepath.Join(e.c.path, filepath.Dir(app.SrcPath()))
-	absDst := filepath.Join(rootPath, filepath.Dir(dst))
+	dst := filepath.Clean(filepath.Join(baseLocation, "..", "overlays", e.name))
+	absDst := filepath.Join(e.c.path, dst)
+
 	err = helpers.CopyDir(absSrc, absDst)
 	if err != nil {
 		return err
@@ -202,6 +208,15 @@ func (e *Environment) installApp(rootPath string, app *Application) error {
 
 	app.SetSrcPath(dst)
 	return app.Save()
+}
+
+func (e *Environment) installNewApp(srcConfigPath string, app *Application) error {
+	src := app.SrcPath()
+	appFolder := filepath.Clean(filepath.Join(src, "..", ".."))
+	absSrc := filepath.Join(srcConfigPath, appFolder)
+
+	absDst := filepath.Join(e.c.path, appFolder)
+	return helpers.CopyDir(absSrc, absDst)
 }
 
 func (e *Environment) LeafApps() ([]*Application, error) {

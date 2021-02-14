@@ -48,6 +48,14 @@ func CopyDir(source, destination string) error {
 				return err
 			}
 
+			dstDir := filepath.Dir(absDst)
+			if _, err := os.Stat(dstDir); os.IsNotExist(err) {
+				err = os.MkdirAll(dstDir, os.ModePerm)
+				if err != nil {
+					return err
+				}
+			}
+
 			return ioutil.WriteFile(absDst, data, info.Mode())
 		}
 	})

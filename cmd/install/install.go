@@ -148,7 +148,7 @@ func install(ctx context.Context, opts *options) {
 func prepareBase(ctx context.Context, opts *options) {
 	var err error
 	log.G(ctx).Debug("creating temp dir for template repo")
-	values.TemplateRepoClonePath, err = ioutil.TempDir("", "")
+	values.TemplateRepoClonePath, err = ioutil.TempDir("", "tpl-*")
 	cferrors.CheckErr(err)
 
 	log.G(ctx).WithField("location", values.TemplateRepoClonePath).Debug("temp dir created")
@@ -191,7 +191,7 @@ func tryCloneExistingRepo(ctx context.Context, opts *options) {
 	}
 
 	log.G(ctx).Debug("creating temp dir for gitops repo")
-	values.GitopsRepoClonePath, err = ioutil.TempDir("", "")
+	values.GitopsRepoClonePath, err = ioutil.TempDir("", "repo-")
 	cferrors.CheckErr(err)
 	log.G(ctx).WithField("location", values.GitopsRepoClonePath).Debug("temp dir created")
 
