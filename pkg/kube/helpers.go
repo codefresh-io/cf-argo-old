@@ -118,10 +118,18 @@ func (c *client) wait(ctx context.Context, opts *WaitOptions) error {
 		rscs[r] = true
 	}
 
-	return wait.PollImmediate(opts.Interval, opts.Timeout, func() (done bool, err error) {
+	interval := defaultPollInterval
+	timeout := defaultPollTimeout
+	if opts.Interval > 0 {
+		interval = opts.Interval
+	}
+	if opts.Timeout > 0 {
+		timeout = opts.Timeout
+	}
+
+	return wait.PollImmediate(interval, timeout, func() (done bool, err error) {
 		itr += 1
 		allReady := true
-		log.G(ctx).Debug("starting new wait poll event")
 		for r := range rscs {
 			ll := log.G(ctx).WithFields(log.Fields{
 				"itr":       itr,

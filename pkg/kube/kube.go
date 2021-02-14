@@ -60,8 +60,8 @@ func NewConfig() *Config {
 func (c *Config) AddFlagSet(cmd *cobra.Command) {
 	flags := pflag.NewFlagSet("kubernetes", pflag.ContinueOnError)
 
-	flags.StringVar(c.cfg.KubeConfig, "kubeconfig", viper.GetString("kubeconfig"), "path to the kubeconfig file [KUBECONFIG]")
-	flags.StringVar(c.cfg.Context, "kube-context", viper.GetString("kube-context"), "name of the kubeconfig context to use")
+	flags.StringVar(c.cfg.KubeConfig, "kubeconfig", viper.GetString("kubeconfig"), "path to the kubeconfig file [KUBECONFIG] (default: ~/.kube/config)")
+	flags.StringVar(c.cfg.Context, "kube-context", viper.GetString("kube-context"), "name of the kubeconfig context to use (default: current context)")
 	viper.SetDefault("kubeconfig", defaultConfigPath())
 	_ = viper.BindEnv("kubeconfig", "KUBECONFIG")
 

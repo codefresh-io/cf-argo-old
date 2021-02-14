@@ -12,12 +12,14 @@ import (
 	"github.com/argoproj/argo-cd/pkg/apis/application/v1alpha1"
 	"github.com/ghodss/yaml"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	kustomize "sigs.k8s.io/kustomize/api/types"
 )
 
 // errors
 var (
 	ErrEnvironmentAlreadyExists = errors.New("environment already exists")
 	ErrEnvironmentNotExist      = errors.New("environment does not exist")
+	ErrAppNotFound              = errors.New("app not found")
 
 	yamlSeparator = regexp.MustCompile(`\n---`)
 
@@ -38,17 +40,18 @@ const (
 type (
 	Config struct {
 		path         string                  // the path from which the config was loaded
-		Version      string                  `yaml:"version"`
-		Environments map[string]*Environment `yaml:"environments"`
+		Version      string                  `json:"version"`
+		Environments map[string]*Environment `json:"environments"`
 	}
 	Environment struct {
 		c                   *Config
-		RootApplicationPath string `yaml:"rootAppPath"`
+		RootApplicationPath string `json:"rootAppPath"`
 	}
 
 	Application struct {
 		*v1alpha1.Application
-		path string
+		parent *Application
+		path   string
 	}
 )
 
@@ -73,20 +76,65 @@ func (c *Config) Persist() error {
 // AddEnvironmentP adds a new environment, copies all of the argocd apps to the relative
 // location in the repository that c is managing, and persists the config object
 func (c *Config) AddEnvironmentP(name string, env *Environment) error {
-	// copy all of the argocd apps to the correct location in the destination repo
-	if err := c.copyEnv(name, env); err != nil {
-		return err
+	if _, exists := c.Environments[name]; exists {
+		return fmt.Errorf("%w: %s", ErrEnvironmentAlreadyExists, name)
 	}
 
-	// add new env to config file
-	if _, exists := c.Environments[name]; exists {
-		return ErrEnvironmentAlreadyExists
+	// copy all of the argocd apps to the correct location in the destination repo
+	if err := c.installEnv(name, env); err != nil {
+		return err
 	}
 
 	env.c = c
 	c.Environments[name] = env
 
 	return c.Persist()
+}
+
+func (c *Config) installEnv(envName string, env *Environment) error {
+	lapps, err := env.LeafApps()
+	if err != nil {
+		return err
+	}
+
+	for _, la := range lapps {
+		if err = c.installApp(la); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *Config) GetAppByName(appName string) (*Application, error) {
+	var err error
+	var app *Application
+
+	for _, e := range c.Environments {
+		app, err = e.GetAppByName(appName)
+		if err != nil && !errors.Is(err, ErrAppNotFound) {
+			return nil, err
+		}
+		if app != nil {
+			return app, nil
+		}
+	}
+
+	return app, err
+}
+
+func (c *Config) installApp(app *Application) error {
+	refApp, err := c.GetAppByName(app.CfName())
+	if err != nil {
+		if !errors.Is(err, ErrAppNotFound) {
+			return err
+		}
+		refApp = &Application{
+			path:        app.path,
+			Application: app.DeepCopy(),
+		}
+	}
+
 }
 
 func (c *Config) copyEnv(envName string, env *Environment) error {
@@ -118,6 +166,10 @@ func (c *Config) copyEnv(envName string, env *Environment) error {
 
 	env.RootApplicationPath = fmt.Sprintf("./%s/%s.yaml", destArgoAppsDir, envName)
 
+	return nil
+}
+
+func (c *Environment) installRoot(envName string, env *Environment) error {
 	return nil
 }
 
@@ -189,7 +241,7 @@ func (e *Environment) leafAppsRecurse(root *Application) ([]*Application, error)
 	isLeaf := true
 	res := []*Application{}
 	for _, f := range filenames {
-		childApp, err := getAppFromFile(f)
+		childApp, err := getAppFromFile(f, root)
 		if err != nil {
 			fmt.Printf("file is not an argo-cd application manifest %s\n", f)
 			continue
@@ -212,7 +264,7 @@ func (e *Environment) leafAppsRecurse(root *Application) ([]*Application, error)
 }
 
 func (e *Environment) getRootApp() (*Application, error) {
-	return getAppFromFile(filepath.Join(e.c.path, e.RootApplicationPath))
+	return getAppFromFile(filepath.Join(e.c.path, e.RootApplicationPath), nil)
 }
 
 func (e *Environment) GetAppByName(appName string) (*Application, error) {
@@ -226,7 +278,7 @@ func (e *Environment) GetAppByName(appName string) (*Application, error) {
 		return nil, err
 	}
 	if app == nil {
-		return nil, fmt.Errorf("app not found: %s", appName)
+		return nil, fmt.Errorf("%w: %s", ErrAppNotFound, appName)
 	}
 	return app, nil
 }
@@ -243,7 +295,7 @@ func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*A
 	}
 
 	for _, f := range filenames {
-		app, err := getAppFromFile(f)
+		app, err := getAppFromFile(f, root)
 		if err != nil || app == nil {
 			// not an argocd app - ignore
 			continue
@@ -262,7 +314,7 @@ func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*A
 	return nil, nil
 }
 
-func getAppFromFile(path string) (*Application, error) {
+func getAppFromFile(path string, parent *Application) (*Application, error) {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -280,7 +332,11 @@ func getAppFromFile(path string) (*Application, error) {
 
 		if u.GetKind() == "Application" {
 			app := &v1alpha1.Application{}
-			return &Application{app, path}, yaml.Unmarshal(data, app)
+			if err := yaml.Unmarshal(data, app); err != nil {
+				return nil, err
+			}
+
+			return &Application{app, parent, path}, nil
 		}
 	}
 
@@ -293,6 +349,10 @@ func (a *Application) SrcPath() string {
 
 func (a *Application) SetSrcPath(newPath string) {
 	a.Spec.Source.Path = newPath
+}
+
+func (a *Application) SetPath(newPath string) {
+	a.path = newPath
 }
 
 func (a *Application) CfName() string {
@@ -309,6 +369,22 @@ func (a *Application) labelValue(label string) string {
 	}
 
 	return a.Labels[label]
+}
+
+func (a *Application) getBaseLocation(absRoot string) (string, error) {
+	refKust := filepath.Join(absRoot, a.SrcPath(), "kustomization.yaml")
+	bytes, err := ioutil.ReadFile(refKust)
+	if err != nil {
+		return "", err
+	}
+
+	k := &kustomize.Kustomization{}
+	err = yaml.Unmarshal(bytes, k)
+	if err != nil {
+		return "", err
+	}
+
+	return "", nil
 }
 
 func (a *Application) Save() error {

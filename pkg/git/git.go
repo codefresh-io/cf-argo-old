@@ -63,7 +63,6 @@ type (
 		// Path where to clone to
 		Path string
 		Auth *Auth
-		Ref  string
 	}
 
 	PushOptions struct {
@@ -124,16 +123,21 @@ func SplitCloneURL(cloneURL string) (owner string, repo string, err error) {
 	return
 }
 
+func getRef(cloneURL string) string {
+	u, err := url.Parse(cloneURL)
+	if err != nil {
+		return ""
+	}
+
+	return u.Fragment
+}
+
 func Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
 	if opts == nil {
 		return nil, cferrors.ErrNilOpts
 	}
 
 	auth := getAuth(opts.Auth)
-	log.G(ctx).WithFields(log.Fields{
-		"url":  opts.URL,
-		"path": opts.Path,
-	}).Debug("cloning repo")
 
 	cloneOpts := &gg.CloneOptions{
 		Depth:    1,
@@ -142,9 +146,19 @@ func Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
 		Progress: os.Stderr,
 	}
 
-	if opts.Ref != "" {
-		cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(opts.Ref)
+	if ref := getRef(opts.URL); ref != "" {
+		cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(ref)
+		cloneOpts.URL = opts.URL[:strings.LastIndex(opts.URL, ref)-1]
+	} else if i := strings.LastIndex(opts.URL, "@"); i > -1 {
+		cloneOpts.ReferenceName = plumbing.NewTagReferenceName(opts.URL[i+1:])
+		cloneOpts.URL = opts.URL[:i]
 	}
+
+	log.G(ctx).WithFields(log.Fields{
+		"url":  opts.URL,
+		"path": opts.Path,
+		"ref":  cloneOpts.ReferenceName,
+	}).Debug("cloning repo")
 
 	err := cloneOpts.Validate()
 	if err != nil {

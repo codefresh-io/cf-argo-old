@@ -3,10 +3,10 @@
 OUT_DIR="./dist"
 BINARY_NAME="cf-argo"
 
-VERSION="v0.0.1"
+VERSION="v0.0.2"
 GIT_COMMIT=$(shell git rev-parse HEAD)
 
-BASE_GIT_URL="https://github.com/codefresh-io/argocd-template"
+BASE_GIT_URL="https://github.com/codefresh-io/argocd-template@v0.1.0"
 
 ifndef GOPATH
 $(error GOPATH is not set, please make sure you set your GOPATH correctly!)
@@ -32,9 +32,8 @@ $(GOPATH)/bin/golangci-lint:
 .PHONY: lint
 lint: $(GOPATH)/bin/golangci-lint
 	@go mod tidy
-	# Lint Go files
+	@echo linting go code...
 	@golangci-lint run --fix
-
 
 .PHONY: clean
 clean:
