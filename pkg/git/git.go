@@ -29,6 +29,8 @@ type (
 		Commit(ctx context.Context, msg string) (string, error)
 
 		Push(context.Context, *PushOptions) error
+
+		HasRemotes() (bool, error)
 	}
 
 	// Provider represents a git provider
@@ -269,6 +271,15 @@ func (r *repo) Push(ctx context.Context, opts *PushOptions) error {
 
 	l.Debug("pushed to repo")
 	return nil
+}
+
+func (r *repo) HasRemotes() (bool, error) {
+	remotes, err := r.r.Remotes()
+	if err != nil {
+		return false, err
+	}
+
+	return len(remotes) > 0, nil
 }
 
 func getAuth(auth *Auth) transport.AuthMethod {

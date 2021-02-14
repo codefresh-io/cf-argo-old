@@ -38,14 +38,17 @@ func CopyDir(source, destination string) error {
 		if relPath == "" {
 			return nil
 		}
+
+		absDst := filepath.Join(destination, relPath)
 		if info.IsDir() {
-			return os.Mkdir(filepath.Join(destination, relPath), info.Mode())
+			return os.Mkdir(absDst, info.Mode())
 		} else {
-			var data, err1 = ioutil.ReadFile(filepath.Join(source, relPath))
-			if err1 != nil {
-				return err1
+			data, err := ioutil.ReadFile(path)
+			if err != nil {
+				return err
 			}
-			return ioutil.WriteFile(filepath.Join(destination, relPath), data, info.Mode())
+
+			return ioutil.WriteFile(absDst, data, info.Mode())
 		}
 	})
 }

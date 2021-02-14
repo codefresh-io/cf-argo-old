@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/argoproj/argo-cd/pkg/apis/application/v1alpha1"
+	"github.com/codefresh-io/cf-argo/pkg/helpers"
 	"github.com/ghodss/yaml"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kustomize "sigs.k8s.io/kustomize/api/types"
@@ -43,8 +44,10 @@ type (
 		Version      string                  `json:"version"`
 		Environments map[string]*Environment `json:"environments"`
 	}
+
 	Environment struct {
 		c                   *Config
+		name                string
 		RootApplicationPath string `json:"rootAppPath"`
 	}
 
@@ -75,32 +78,39 @@ func (c *Config) Persist() error {
 
 // AddEnvironmentP adds a new environment, copies all of the argocd apps to the relative
 // location in the repository that c is managing, and persists the config object
-func (c *Config) AddEnvironmentP(name string, env *Environment) error {
-	if _, exists := c.Environments[name]; exists {
-		return fmt.Errorf("%w: %s", ErrEnvironmentAlreadyExists, name)
+func (c *Config) AddEnvironmentP(env *Environment) error {
+	if _, exists := c.Environments[env.name]; exists {
+		return fmt.Errorf("%w: %s", ErrEnvironmentAlreadyExists, env.name)
 	}
 
 	// copy all of the argocd apps to the correct location in the destination repo
-	if err := c.installEnv(name, env); err != nil {
+	if err := c.installEnv(env); err != nil {
 		return err
 	}
 
 	env.c = c
-	c.Environments[name] = env
-
+	c.Environments[env.name] = env
 	return c.Persist()
 }
 
-func (c *Config) installEnv(envName string, env *Environment) error {
+func (c *Config) installEnv(env *Environment) error {
 	lapps, err := env.LeafApps()
 	if err != nil {
 		return err
 	}
 
 	for _, la := range lapps {
-		if err = c.installApp(la); err != nil {
+		if err = env.installApp(c.path, la); err != nil {
 			return err
 		}
+	}
+
+	src := filepath.Join(env.c.path, filepath.Dir(env.RootApplicationPath))
+	refEnv := c.FirstEnv()
+	dst := filepath.Join(c.path, filepath.Dir(refEnv.RootApplicationPath))
+	err = helpers.CopyDir(src, dst)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -121,66 +131,6 @@ func (c *Config) GetAppByName(appName string) (*Application, error) {
 	}
 
 	return app, err
-}
-
-func (c *Config) installApp(app *Application) error {
-	refApp, err := c.GetAppByName(app.CfName())
-	if err != nil {
-		if !errors.Is(err, ErrAppNotFound) {
-			return err
-		}
-		refApp = &Application{
-			path:        app.path,
-			Application: app.DeepCopy(),
-		}
-	}
-
-}
-
-func (c *Config) copyEnv(envName string, env *Environment) error {
-	destArgoAppsDir := ""
-	srcArgoAppsDir := filepath.Dir(env.RootApplicationPath)
-
-	if len(c.Environments) != 0 {
-		destArgoAppsDir = filepath.Dir(c.FirstEnv().RootApplicationPath)
-	} else {
-		destArgoAppsDir = filepath.Dir(env.RootApplicationPath)
-	}
-
-	if err := env.moveApp(componentsAppName, filepath.Join(destArgoAppsDir, envName, componentsAppName)); err != nil {
-		return err
-	}
-	if err := env.moveApp(entitiesAppName, filepath.Join(destArgoAppsDir, envName, entitiesAppName)); err != nil {
-		return err
-	}
-	if err := env.moveApp(rootAppName, filepath.Join(destArgoAppsDir, envName)); err != nil {
-		return err
-	}
-
-	copyFiles := []string{fmt.Sprintf("%s.yaml", envName), fmt.Sprintf("%s-project.yaml", envName), envName}
-	for _, fn := range copyFiles {
-		if err := os.Rename(filepath.Join(env.c.path, srcArgoAppsDir, fn), filepath.Join(c.path, destArgoAppsDir, fn)); err != nil {
-			return err
-		}
-	}
-
-	env.RootApplicationPath = fmt.Sprintf("./%s/%s.yaml", destArgoAppsDir, envName)
-
-	return nil
-}
-
-func (c *Environment) installRoot(envName string, env *Environment) error {
-	return nil
-}
-
-func (e *Environment) moveApp(appName, dst string) error {
-	app, err := e.GetAppByName(appName)
-	if err != nil {
-		return err
-	}
-	app.SetSrcPath(dst)
-
-	return app.Save()
 }
 
 // DeleteEnvironmentP deletes an environment and persists the config object
@@ -216,11 +166,42 @@ func LoadConfig(path string) (*Config, error) {
 	if err = yaml.Unmarshal(data, c); err != nil {
 		return nil, err
 	}
-	for _, e := range c.Environments {
+	for name, e := range c.Environments {
 		e.c = c
+		e.name = name
 	}
 
 	return c, nil
+}
+
+func (e *Environment) installApp(rootPath string, app *Application) error {
+	refApp, err := e.c.GetAppByName(app.CfName())
+	if err != nil {
+		if !errors.Is(err, ErrAppNotFound) {
+			return err
+		}
+		refApp = &Application{
+			path:        app.path,
+			Application: app.DeepCopy(),
+		}
+	}
+
+	baseLocation, err := refApp.getBaseLocation(e.c.path)
+	if err != nil {
+		return err
+	}
+
+	dst := filepath.Clean(filepath.Join(baseLocation, "..", "overlays", e.name))
+
+	absSrc := filepath.Join(e.c.path, filepath.Dir(app.SrcPath()))
+	absDst := filepath.Join(rootPath, filepath.Dir(dst))
+	err = helpers.CopyDir(absSrc, absDst)
+	if err != nil {
+		return err
+	}
+
+	app.SetSrcPath(dst)
+	return app.Save()
 }
 
 func (e *Environment) LeafApps() ([]*Application, error) {
@@ -288,7 +269,7 @@ func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*A
 		return root, nil
 	}
 
-	appsDir := root.Spec.Source.Path // check if it's not in this repo
+	appsDir := root.SrcPath() // check if it's not in this repo
 	filenames, err := filepath.Glob(filepath.Join(e.c.path, appsDir, "*.yaml"))
 	if err != nil {
 		return nil, err
@@ -384,7 +365,7 @@ func (a *Application) getBaseLocation(absRoot string) (string, error) {
 		return "", err
 	}
 
-	return "", nil
+	return filepath.Clean(filepath.Join(a.SrcPath(), k.Resources[0])), nil
 }
 
 func (a *Application) Save() error {

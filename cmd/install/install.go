@@ -117,6 +117,12 @@ func install(ctx context.Context, opts *options) {
 	log.G(ctx).Printf("cloning template repository...")
 	prepareBase(ctx, opts)
 
+	if values.GitopsRepo == nil {
+		initializeNewGitopsRepo(ctx, opts)
+	} else {
+		addToExistingGitopsRepo(ctx, opts)
+	}
+
 	log.G(ctx).Printf("building bootstrap resources...")
 	installBootstrapResources(ctx, opts)
 	if opts.dryRun {
@@ -184,7 +190,7 @@ func tryCloneExistingRepo(ctx context.Context, opts *options) {
 		return // we will create it later
 	}
 
-	log.G(ctx).Debug("creating temp dir for template repo")
+	log.G(ctx).Debug("creating temp dir for gitops repo")
 	values.GitopsRepoClonePath, err = ioutil.TempDir("", "")
 	cferrors.CheckErr(err)
 	log.G(ctx).WithField("location", values.GitopsRepoClonePath).Debug("temp dir created")
@@ -331,15 +337,22 @@ func installBootstrapResources(ctx context.Context, opts *options) {
 }
 
 func persistGitopsRepo(ctx context.Context, opts *options) {
-	if values.GitopsRepo == nil {
-		initializeNewGitopsRepo(ctx, opts)
-	} else {
-		addToExistingGitopsRepo(ctx, opts)
+	hasRemotes, err := values.GitopsRepo.HasRemotes()
+	cferrors.CheckErr(err)
+
+	if !hasRemotes {
+		log.G(ctx).Printf("creating gitops repository: %s/%s...", opts.repoOwner, opts.repoName)
+		cloneURL, err := createRemoteRepo(ctx, opts)
+		cferrors.CheckErr(err)
+
+		cferrors.CheckErr(values.GitopsRepo.AddRemote(ctx, "origin", cloneURL))
 	}
+
+	cferrors.CheckErr(os.RemoveAll(filepath.Join(values.TemplateRepoClonePath, values.BootstrapDir)))
 
 	cferrors.CheckErr(values.GitopsRepo.Add(ctx, "."))
 
-	_, err := values.GitopsRepo.Commit(ctx, fmt.Sprintf("added environment %s", values.EnvName))
+	_, err = values.GitopsRepo.Commit(ctx, fmt.Sprintf("added environment %s", values.EnvName))
 	cferrors.CheckErr(err)
 
 	log.G(ctx).Printf("pushing to gitops repo...")
@@ -357,14 +370,6 @@ func initializeNewGitopsRepo(ctx context.Context, opts *options) {
 	values.GitopsRepoClonePath = values.TemplateRepoClonePath
 	values.GitopsRepo, err = git.Init(ctx, values.GitopsRepoClonePath)
 	cferrors.CheckErr(err)
-
-	cferrors.CheckErr(os.RemoveAll(filepath.Join(values.TemplateRepoClonePath, values.BootstrapDir)))
-
-	log.G(ctx).Printf("creating gitops repository: %s/%s...", opts.repoOwner, opts.repoName)
-	cloneURL, err := createRemoteRepo(ctx, opts)
-	cferrors.CheckErr(err)
-
-	cferrors.CheckErr(values.GitopsRepo.AddRemote(ctx, "origin", cloneURL))
 }
 
 func addToExistingGitopsRepo(ctx context.Context, opts *options) {
@@ -378,59 +383,8 @@ func addToExistingGitopsRepo(ctx context.Context, opts *options) {
 		panic(fmt.Errorf("existing repo has no environments in config file"))
 	}
 
-	conf.AddEnvironmentP(values.EnvName, tplConf.FirstEnv())
-
-	// tplEnv := tplConf.FirstEnv()
-
-	// // we use the current first env as a reference to how the new env should be added
-	// refEnv := conf.FirstEnv()
-
-	// get all of the argocd apps we want to copy to the existing repo
-	// la, err := tplEnv.LeafApps()
-	// cferrors.CheckErr(err)
-
-	// for _, tplApp := range la {
-	// 	refApp, err := refEnv.GetAppByName(tplApp.CfName())
-	// 	if err != nil {
-	// 		if errors.Is(err, envman.ErrAppNotFound) { // or whatever
-	// 			panic(err)
-	// 		}
-
-	// 		// we need to separate between move (or copy) the app.yaml file, and move (or copy) the entire folder-structure of the app.source.path
-	// 		// and (another option) - just updating the app.source.path string (so - update the object, and saving back to file)
-	// 		// so it's all very confusing
-
-	// 		// CopyApp - Copy the app.yaml file from its current location to a different folder
-	// 		// UpdateAppPath - Update the path in memory, and save it back to it's current app.yaml file
-	// 		// MoveAppResources - Get the folder-structure referenced by the app.source.path field, and copy it to a new destination folder
-	// 		//                        also - call UpdateAppPath to update the reference to the new location
-	// 		// I know the names are too long. But that can be the start
-	// 	}
-	// 	cferrors.CheckErr(err)
-
-	// 	refSrcPath := refApp.Spec.Source.Path
-	// 	refKust := filepath.Join(values.GitopsRepoClonePath, refSrcPath, "kustomization.yaml")
-	// 	bytes, err := ioutil.ReadFile(refKust)
-	// 	cferrors.CheckErr(err)
-
-	// 	k := &kustomize.Kustomization{}
-	// 	cferrors.CheckErr(yaml.Unmarshal(bytes, k))
-
-	// 	oldRelPath := tplApp.Spec.Source.Path
-	// 	src := filepath.Join(values.TemplateRepoClonePath, oldRelPath)
-
-	// 	newRelPath := filepath.Clean(filepath.Join(refSrcPath, k.Resources[0], "../overlays", values.EnvName))
-	// 	dst := filepath.Join(values.GitopsRepoClonePath, newRelPath)
-
-	// 	cferrors.CheckErr(os.Rename(src, dst))
-	// 	log.G(ctx).Debugf("moving %s to %s", src, dst)
-
-	// 	tplApp.Spec.Source.Path = newRelPath
-	// 	cferrors.CheckErr(tplApp.Save())
-	// }
-
-	// log.G(ctx).Printf("saving new environment: %s", values.EnvName)
-	// cferrors.CheckErr(conf.AddEnvironmentP(values.EnvName, tplEnv))
+	err = conf.AddEnvironmentP(tplConf.FirstEnv())
+	cferrors.CheckErr(err)
 }
 
 func createRemoteRepo(ctx context.Context, opts *options) (string, error) {
