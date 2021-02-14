@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/util/cert"
 )
 
-func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath string, dryRun bool) (*v1alpha1.SealedSecret, error) {
+func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath string) (*v1alpha1.SealedSecret, error) {
 	if err := sscheme.AddToScheme(scheme.Scheme); err != nil {
 		return nil, err
 	}
@@ -26,10 +26,6 @@ func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath
 	s, err := getSecretFromFile(ctx, secretPath)
 	if err != nil {
 		return nil, err
-	}
-
-	if dryRun {
-		return parseSecret(s), nil
 	}
 
 	rsaPub, err := getPubKey(ctx, namespace)

@@ -283,7 +283,7 @@ func createArgocdApp(ctx context.Context, opts *options) error {
 
 func createSealedSecret(ctx context.Context, opts *options) error {
 	secretPath := filepath.Join(values.TemplateRepoClonePath, values.BootstrapDir, "secret.yaml")
-	s, err := ss.CreateSealedSecretFromSecretFile(ctx, values.Namespace, secretPath, opts.dryRun)
+	s, err := ss.CreateSealedSecretFromSecretFile(ctx, values.Namespace, secretPath)
 	if err != nil {
 		return err
 	}
