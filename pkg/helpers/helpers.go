@@ -88,7 +88,6 @@ func RenderDirRecurse(pattern string, values interface{}) error {
 	return nil
 }
 
-// TODO maybe there is a more efficient way to do this
 func RenameFilesWithEnvName(ctx context.Context, path, env string) error {
 	matches, err := filepathx.Glob(filepath.Join(path, fmt.Sprintf("**/%s", envNamePlaceholder)))
 	if err != nil {
