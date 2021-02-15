@@ -49,8 +49,7 @@ type (
 
 	Application struct {
 		*v1alpha1.Application
-		parent *Application
-		path   string
+		path string
 	}
 )
 
@@ -79,8 +78,8 @@ func (c *Config) AddEnvironmentP(env *Environment) error {
 		return fmt.Errorf("%w: %s", ErrEnvironmentAlreadyExists, env.name)
 	}
 
-	newEnv, err := c.installEnv(env)
 	// copy all of the argocd apps to the correct location in the destination repo
+	newEnv, err := c.installEnv(env)
 	if err != nil {
 		return err
 	}
@@ -106,9 +105,9 @@ func (c *Config) installEnv(env *Environment) (*Environment, error) {
 		}
 	}
 
+	// copy the tpl "argocd-apps" to the matching dir in the dst repo
 	src := filepath.Join(env.c.path, filepath.Dir(env.RootApplicationPath))
-	refEnv := c.FirstEnv()
-	dst := filepath.Join(c.path, filepath.Dir(refEnv.RootApplicationPath))
+	dst := filepath.Join(c.path, filepath.Dir(c.FirstEnv().RootApplicationPath))
 	err = helpers.CopyDir(src, dst)
 	if err != nil {
 		return nil, err
@@ -175,7 +174,7 @@ func LoadConfig(path string) (*Config, error) {
 	return c, nil
 }
 
-func (e *Environment) installApp(srcConfigPath string, app *Application) error {
+func (e *Environment) installApp(srcRootPath string, app *Application) error {
 	appName := app.CfName()
 	refApp, err := e.c.GetAppByName(appName)
 	if err != nil {
@@ -183,7 +182,7 @@ func (e *Environment) installApp(srcConfigPath string, app *Application) error {
 			return err
 		}
 
-		return e.installNewApp(srcConfigPath, app)
+		return e.installNewApp(srcRootPath, app)
 	}
 
 	baseLocation, err := refApp.getBaseLocation(e.c.path)
@@ -191,8 +190,7 @@ func (e *Environment) installApp(srcConfigPath string, app *Application) error {
 		return err
 	}
 
-	src := app.SrcPath()
-	absSrc := filepath.Join(srcConfigPath, src)
+	absSrc := filepath.Join(srcRootPath, app.SrcPath())
 
 	dst := filepath.Clean(filepath.Join(baseLocation, "..", "overlays", e.name))
 	absDst := filepath.Join(e.c.path, dst)
@@ -206,12 +204,11 @@ func (e *Environment) installApp(srcConfigPath string, app *Application) error {
 	return app.Save()
 }
 
-func (e *Environment) installNewApp(srcConfigPath string, app *Application) error {
-	src := app.SrcPath()
-	appFolder := filepath.Clean(filepath.Join(src, "..", ".."))
-	absSrc := filepath.Join(srcConfigPath, appFolder)
-
+func (e *Environment) installNewApp(srcRootPath string, app *Application) error {
+	appFolder := filepath.Clean(filepath.Join(app.SrcPath(), "..", ".."))
+	absSrc := filepath.Join(srcRootPath, appFolder)
 	absDst := filepath.Join(e.c.path, appFolder)
+
 	return helpers.CopyDir(absSrc, absDst)
 }
 
@@ -233,7 +230,7 @@ func (e *Environment) leafAppsRecurse(root *Application) ([]*Application, error)
 	isLeaf := true
 	res := []*Application{}
 	for _, f := range filenames {
-		childApp, err := getAppFromFile(f, root)
+		childApp, err := getAppFromFile(f)
 		if err != nil {
 			fmt.Printf("file is not an argo-cd application manifest %s\n", f)
 			continue
@@ -256,7 +253,7 @@ func (e *Environment) leafAppsRecurse(root *Application) ([]*Application, error)
 }
 
 func (e *Environment) getRootApp() (*Application, error) {
-	return getAppFromFile(filepath.Join(e.c.path, e.RootApplicationPath), nil)
+	return getAppFromFile(filepath.Join(e.c.path, e.RootApplicationPath))
 }
 
 func (e *Environment) GetAppByName(appName string) (*Application, error) {
@@ -287,7 +284,7 @@ func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*A
 	}
 
 	for _, f := range filenames {
-		app, err := getAppFromFile(f, root)
+		app, err := getAppFromFile(f)
 		if err != nil || app == nil {
 			// not an argocd app - ignore
 			continue
@@ -306,7 +303,7 @@ func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*A
 	return nil, nil
 }
 
-func getAppFromFile(path string, parent *Application) (*Application, error) {
+func getAppFromFile(path string) (*Application, error) {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -328,7 +325,7 @@ func getAppFromFile(path string, parent *Application) (*Application, error) {
 				return nil, err
 			}
 
-			return &Application{app, parent, path}, nil
+			return &Application{app, path}, nil
 		}
 	}
 

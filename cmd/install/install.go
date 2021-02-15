@@ -369,8 +369,7 @@ func addToExistingGitopsRepo(ctx context.Context, opts *options) {
 		panic(fmt.Errorf("existing repo has no environments in config file"))
 	}
 
-	err = conf.AddEnvironmentP(tplConf.FirstEnv())
-	cferrors.CheckErr(err)
+	cferrors.CheckErr(conf.AddEnvironmentP(tplConf.FirstEnv()))
 }
 
 func apply(ctx context.Context, opts *options, data []byte) error {
