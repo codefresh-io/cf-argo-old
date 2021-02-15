@@ -140,7 +140,7 @@ func install(ctx context.Context, opts *options) {
 func prepareBase(ctx context.Context, opts *options) {
 	var err error
 	log.G(ctx).Debug("creating temp dir for template repo")
-	values.TemplateRepoClonePath, err = ioutil.TempDir("", "tpl-*")
+	values.TemplateRepoClonePath, err = ioutil.TempDir("", "tpl-")
 	cferrors.CheckErr(err)
 
 	log.G(ctx).WithField("location", values.TemplateRepoClonePath).Debug("temp dir created")
