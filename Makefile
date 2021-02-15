@@ -33,7 +33,7 @@ $(GOPATH)/bin/golangci-lint:
 lint: $(GOPATH)/bin/golangci-lint
 	@go mod tidy
 	@echo linting go code...
-	@golangci-lint run --fix
+	@golangci-lint run --fix --timeout 3m
 
 .PHONY: clean
 clean:

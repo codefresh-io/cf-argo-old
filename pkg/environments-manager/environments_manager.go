@@ -23,10 +23,6 @@ var (
 	ErrAppNotFound              = errors.New("app not found")
 
 	yamlSeparator = regexp.MustCompile(`\n---`)
-
-	rootAppName       = "root"
-	componentsAppName = "components"
-	entitiesAppName   = "entities"
 )
 
 const (
