@@ -43,10 +43,10 @@ type options struct {
 var values struct {
 	BootstrapDir          string
 	GitToken              string
-	EnvName               string
+	EnvName               string // why?
 	Namespace             string
-	RepoOwner             string
-	RepoName              string
+	RepoOwner             string // why?
+	RepoName              string // why?
 	TemplateRepoClonePath string
 	GitopsRepoClonePath   string
 	GitopsRepo            git.Repository
@@ -171,8 +171,8 @@ func tryCloneExistingRepo(ctx context.Context, opts *options) {
 	cferrors.CheckErr(err)
 
 	cloneURL, err := p.GetRepository(ctx, &git.GetRepositoryOptions{
-		Owner: values.RepoOwner,
-		Name:  values.RepoName,
+		Owner: opts.repoOwner,
+		Name:  opts.repoName,
 	})
 	if err != nil {
 		if err != git.ErrRepoNotFound {
@@ -193,6 +193,8 @@ func tryCloneExistingRepo(ctx context.Context, opts *options) {
 		URL:  cloneURL,
 		Path: values.GitopsRepoClonePath,
 	})
+	root, err := values.GitopsRepo.Root()
+	fmt.Printf("root: %s", root)
 	cferrors.CheckErr(err)
 
 	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)

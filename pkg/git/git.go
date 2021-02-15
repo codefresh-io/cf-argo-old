@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/url"
 	"os"
 	"strings"
@@ -31,6 +32,8 @@ type (
 		Push(context.Context, *PushOptions) error
 
 		HasRemotes() (bool, error)
+
+		Root() (string, error)
 	}
 
 	// Provider represents a git provider
@@ -132,6 +135,36 @@ func getRef(cloneURL string) string {
 	}
 
 	return u.Fragment
+}
+
+func CloneExistingRepo(ctx context.Context, repoOwner, repoName, gitToken string) (Repository, error) {
+	p, err := New(&Options{
+		Type: "github", // only option for now
+		Auth: &Auth{
+			Password: gitToken,
+		},
+	})
+	cferrors.CheckErr(err)
+
+	cloneURL, err := p.GetRepository(ctx, &GetRepositoryOptions{
+		Owner: repoOwner,
+		Name:  repoName,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	log.G(ctx).Debug("creating temp dir for gitops repo")
+	clonePath, err := ioutil.TempDir("", "repo-")
+	cferrors.CheckErr(err)
+	log.G(ctx).WithField("location", clonePath).Debug("temp dir created")
+
+	log.G(ctx).Printf("cloning existing gitops repository...")
+
+	return p.Clone(ctx, &CloneOptions{
+		URL:  cloneURL,
+		Path: clonePath,
+	})
 }
 
 func Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
@@ -280,6 +313,15 @@ func (r *repo) HasRemotes() (bool, error) {
 	}
 
 	return len(remotes) > 0, nil
+}
+
+func (r *repo) Root() (string, error) {
+	wt, err := r.r.Worktree()
+	if err != nil {
+		return "", err
+	}
+
+	return wt.Filesystem.Root(), nil
 }
 
 func getAuth(auth *Auth) transport.AuthMethod {

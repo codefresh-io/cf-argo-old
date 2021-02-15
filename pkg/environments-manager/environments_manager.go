@@ -89,9 +89,15 @@ func (c *Config) AddEnvironmentP(env *Environment) error {
 }
 
 // DeleteEnvironmentP deletes an environment and persists the config object
-func (c *Config) DeleteEnvironmentP(name string, env Environment) error {
-	if _, exists := c.Environments[name]; !exists {
+func (c *Config) DeleteEnvironmentP(name string) error {
+	env, exists := c.Environments[name]
+	if !exists {
 		return ErrEnvironmentNotExist
+	}
+
+	err := env.uninstall()
+	if err != nil {
+		return err
 	}
 
 	delete(c.Environments, name)
@@ -212,44 +218,22 @@ func (e *Environment) installNewApp(srcRootPath string, app *Application) error 
 	return helpers.CopyDir(absSrc, absDst)
 }
 
+func (e *Environment) uninstall() error {
+	rootApp, err := e.getRootApp()
+	if err != nil {
+		return err
+	}
+
+	return rootApp.uninstall()
+}
+
 func (e *Environment) leafApps() ([]*Application, error) {
 	rootApp, err := e.getRootApp()
 	if err != nil {
 		return nil, err
 	}
 
-	return e.leafAppsRecurse(rootApp)
-}
-
-func (e *Environment) leafAppsRecurse(root *Application) ([]*Application, error) {
-	filenames, err := filepath.Glob(filepath.Join(e.c.path, root.Spec.Source.Path, "*.yaml"))
-	if err != nil {
-		return nil, err
-	}
-
-	isLeaf := true
-	res := []*Application{}
-	for _, f := range filenames {
-		childApp, err := getAppFromFile(f)
-		if err != nil {
-			fmt.Printf("file is not an argo-cd application manifest %s\n", f)
-			continue
-		}
-
-		if childApp != nil {
-			isLeaf = false
-			childRes, err := e.leafAppsRecurse(childApp)
-			if err != nil {
-				return nil, err
-			}
-			res = append(res, childRes...)
-		}
-	}
-	if isLeaf {
-		res = append(res, root)
-	}
-
-	return res, nil
+	return rootApp.leafApps(e.c.path)
 }
 
 func (e *Environment) getRootApp() (*Application, error) {
@@ -379,4 +363,40 @@ func (a *Application) save() error {
 	}
 
 	return ioutil.WriteFile(a.path, data, 0644)
+}
+
+func (a *Application) leafApps(rootPath string) ([]*Application, error) {
+	filenames, err := filepath.Glob(filepath.Join(rootPath, a.srcPath(), "*.yaml"))
+	if err != nil {
+		return nil, err
+	}
+
+	isLeaf := true
+	res := []*Application{}
+	for _, f := range filenames {
+		childApp, err := getAppFromFile(f)
+		if err != nil {
+			fmt.Printf("file is not an argo-cd application manifest %s\n", f)
+			continue
+		}
+
+		if childApp != nil && childApp.isManagedBy() {
+			isLeaf = false
+			childRes, err := childApp.leafApps(rootPath)
+			if err != nil {
+				return nil, err
+			}
+			res = append(res, childRes...)
+		}
+	}
+
+	if isLeaf && a.isManagedBy() {
+		res = append(res, a)
+	}
+
+	return res, nil
+}
+
+func (a *Application) uninstall() error {
+	return nil
 }

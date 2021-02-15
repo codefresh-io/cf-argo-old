@@ -24,6 +24,7 @@ type (
 	Client interface {
 		kcmdutil.Factory
 		Apply(ctx context.Context, opts *ApplyOptions) error
+		Delete(ctx context.Context, opts *DeleteOptions) error
 		Wait(ctx context.Context, opts *WaitOptions) error
 	}
 	client struct {
