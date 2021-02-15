@@ -9,7 +9,6 @@ import (
 	"io/ioutil"
 
 	"github.com/bitnami-labs/sealed-secrets/pkg/apis/sealed-secrets/v1alpha1"
-	sscheme "github.com/bitnami-labs/sealed-secrets/pkg/client/clientset/versioned/scheme"
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,10 +18,6 @@ import (
 )
 
 func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath string, dryRun bool) (*v1alpha1.SealedSecret, error) {
-	if err := sscheme.AddToScheme(scheme.Scheme); err != nil {
-		return nil, err
-	}
-
 	s, err := getSecretFromFile(ctx, secretPath)
 	if err != nil {
 		return nil, err

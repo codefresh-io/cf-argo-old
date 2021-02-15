@@ -88,51 +88,6 @@ func (c *Config) AddEnvironmentP(env *Environment) error {
 	return c.Persist()
 }
 
-func (c *Config) installEnv(env *Environment) (*Environment, error) {
-	lapps, err := env.LeafApps()
-	if err != nil {
-		return nil, err
-	}
-
-	newEnv := &Environment{
-		name:                env.name,
-		c:                   c,
-		RootApplicationPath: env.RootApplicationPath,
-	}
-	for _, la := range lapps {
-		if err = newEnv.installApp(env.c.path, la); err != nil {
-			return nil, err
-		}
-	}
-
-	// copy the tpl "argocd-apps" to the matching dir in the dst repo
-	src := filepath.Join(env.c.path, filepath.Dir(env.RootApplicationPath))
-	dst := filepath.Join(c.path, filepath.Dir(c.FirstEnv().RootApplicationPath))
-	err = helpers.CopyDir(src, dst)
-	if err != nil {
-		return nil, err
-	}
-
-	return newEnv, nil
-}
-
-func (c *Config) GetAppByName(appName string) (*Application, error) {
-	var err error
-	var app *Application
-
-	for _, e := range c.Environments {
-		app, err = e.GetAppByName(appName)
-		if err != nil && !errors.Is(err, ErrAppNotFound) {
-			return nil, err
-		}
-		if app != nil {
-			return app, nil
-		}
-	}
-
-	return app, err
-}
-
 // DeleteEnvironmentP deletes an environment and persists the config object
 func (c *Config) DeleteEnvironmentP(name string, env Environment) error {
 	if _, exists := c.Environments[name]; !exists {
@@ -174,9 +129,54 @@ func LoadConfig(path string) (*Config, error) {
 	return c, nil
 }
 
+func (c *Config) installEnv(env *Environment) (*Environment, error) {
+	lapps, err := env.leafApps()
+	if err != nil {
+		return nil, err
+	}
+
+	newEnv := &Environment{
+		name:                env.name,
+		c:                   c,
+		RootApplicationPath: env.RootApplicationPath,
+	}
+	for _, la := range lapps {
+		if err = newEnv.installApp(env.c.path, la); err != nil {
+			return nil, err
+		}
+	}
+
+	// copy the tpl "argocd-apps" to the matching dir in the dst repo
+	src := filepath.Join(env.c.path, filepath.Dir(env.RootApplicationPath))
+	dst := filepath.Join(c.path, filepath.Dir(c.FirstEnv().RootApplicationPath))
+	err = helpers.CopyDir(src, dst)
+	if err != nil {
+		return nil, err
+	}
+
+	return newEnv, nil
+}
+
+func (c *Config) getAppByName(appName string) (*Application, error) {
+	var err error
+	var app *Application
+
+	for _, e := range c.Environments {
+		app, err = e.getAppByName(appName)
+		if err != nil && !errors.Is(err, ErrAppNotFound) {
+			return nil, err
+		}
+		if app != nil {
+			return app, nil
+		}
+	}
+
+	return app, err
+}
+
 func (e *Environment) installApp(srcRootPath string, app *Application) error {
-	appName := app.CfName()
-	refApp, err := e.c.GetAppByName(appName)
+	appName := app.cfName()
+	refApp, err := e.c.getAppByName(appName)
 	if err != nil {
 		if !errors.Is(err, ErrAppNotFound) {
 			return err
@@ -190,7 +190,7 @@ func (e *Environment) installApp(srcRootPath string, app *Application) error {
 		return err
 	}
 
-	absSrc := filepath.Join(srcRootPath, app.SrcPath())
+	absSrc := filepath.Join(srcRootPath, app.srcPath())
 
 	dst := filepath.Clean(filepath.Join(baseLocation, "..", "overlays", e.name))
 	absDst := filepath.Join(e.c.path, dst)
@@ -200,19 +200,19 @@ func (e *Environment) installApp(srcRootPath string, app *Application) error {
 		return err
 	}
 
-	app.SetSrcPath(dst)
-	return app.Save()
+	app.setSrcPath(dst)
+	return app.save()
 }
 
 func (e *Environment) installNewApp(srcRootPath string, app *Application) error {
-	appFolder := filepath.Clean(filepath.Join(app.SrcPath(), "..", ".."))
+	appFolder := filepath.Clean(filepath.Join(app.srcPath(), "..", ".."))
 	absSrc := filepath.Join(srcRootPath, appFolder)
 	absDst := filepath.Join(e.c.path, appFolder)
 
 	return helpers.CopyDir(absSrc, absDst)
 }
 
-func (e *Environment) LeafApps() ([]*Application, error) {
+func (e *Environment) leafApps() ([]*Application, error) {
 	rootApp, err := e.getRootApp()
 	if err != nil {
 		return nil, err
@@ -256,7 +256,7 @@ func (e *Environment) getRootApp() (*Application, error) {
 	return getAppFromFile(filepath.Join(e.c.path, e.RootApplicationPath))
 }
 
-func (e *Environment) GetAppByName(appName string) (*Application, error) {
+func (e *Environment) getAppByName(appName string) (*Application, error) {
 	rootApp, err := e.getRootApp()
 	if err != nil {
 		return nil, err
@@ -273,11 +273,11 @@ func (e *Environment) GetAppByName(appName string) (*Application, error) {
 }
 
 func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*Application, error) {
-	if root.CfName() == appName {
+	if root.cfName() == appName {
 		return root, nil
 	}
 
-	appsDir := root.SrcPath() // check if it's not in this repo
+	appsDir := root.srcPath() // check if it's not in this repo
 	filenames, err := filepath.Glob(filepath.Join(e.c.path, appsDir, "*.yaml"))
 	if err != nil {
 		return nil, err
@@ -290,7 +290,7 @@ func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*A
 			continue
 		}
 
-		if !app.IsManagedBy() {
+		if !app.isManagedBy() {
 			continue
 		}
 
@@ -332,23 +332,19 @@ func getAppFromFile(path string) (*Application, error) {
 	return nil, nil
 }
 
-func (a *Application) SrcPath() string {
+func (a *Application) srcPath() string {
 	return a.Spec.Source.Path
 }
 
-func (a *Application) SetSrcPath(newPath string) {
+func (a *Application) setSrcPath(newPath string) {
 	a.Spec.Source.Path = newPath
 }
 
-func (a *Application) SetPath(newPath string) {
-	a.path = newPath
-}
-
-func (a *Application) CfName() string {
+func (a *Application) cfName() string {
 	return a.labelValue(labelsCfName)
 }
 
-func (a *Application) IsManagedBy() bool {
+func (a *Application) isManagedBy() bool {
 	return a.labelValue(labelsManagedBy) == "codefresh.io"
 }
 
@@ -361,7 +357,7 @@ func (a *Application) labelValue(label string) string {
 }
 
 func (a *Application) getBaseLocation(absRoot string) (string, error) {
-	refKust := filepath.Join(absRoot, a.SrcPath(), "kustomization.yaml")
+	refKust := filepath.Join(absRoot, a.srcPath(), "kustomization.yaml")
 	bytes, err := ioutil.ReadFile(refKust)
 	if err != nil {
 		return "", err
@@ -373,10 +369,10 @@ func (a *Application) getBaseLocation(absRoot string) (string, error) {
 		return "", err
 	}
 
-	return filepath.Clean(filepath.Join(a.SrcPath(), k.Resources[0])), nil
+	return filepath.Clean(filepath.Join(a.srcPath(), k.Resources[0])), nil
 }
 
-func (a *Application) Save() error {
+func (a *Application) save() error {
 	data, err := yaml.Marshal(a)
 	if err != nil {
 		return err
