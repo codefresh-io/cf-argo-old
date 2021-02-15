@@ -34,12 +34,20 @@ func ContextWithCancelOnSignals(ctx context.Context, sigs ...os.Signal) context.
 
 func CopyDir(source, destination string) error {
 	return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
 		var relPath string = strings.Replace(path, source, "", 1)
 		if relPath == "" {
 			return nil
 		}
 
 		absDst := filepath.Join(destination, relPath)
+		if err = ensureDir(absDst); err != nil {
+			return err
+		}
+
 		if info.IsDir() {
 			return os.Mkdir(absDst, info.Mode())
 		} else {
@@ -48,17 +56,24 @@ func CopyDir(source, destination string) error {
 				return err
 			}
 
-			dstDir := filepath.Dir(absDst)
-			if _, err := os.Stat(dstDir); os.IsNotExist(err) {
-				err = os.MkdirAll(dstDir, os.ModePerm)
-				if err != nil {
-					return err
-				}
-			}
-
 			return ioutil.WriteFile(absDst, data, info.Mode())
 		}
 	})
+}
+
+func ensureDir(path string) error {
+	dstDir := filepath.Dir(path)
+	if _, err := os.Stat(dstDir); err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		err = os.MkdirAll(dstDir, 0755)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func RenderDirRecurse(pattern string, values interface{}) error {

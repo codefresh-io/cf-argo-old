@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/util/cert"
 )
 
-func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath string) (*v1alpha1.SealedSecret, error) {
+func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath string, dryRun bool) (*v1alpha1.SealedSecret, error) {
 	if err := sscheme.AddToScheme(scheme.Scheme); err != nil {
 		return nil, err
 	}
@@ -26,6 +26,17 @@ func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath
 	s, err := getSecretFromFile(ctx, secretPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if dryRun {
+		s.Data = nil
+		s.StringData = nil
+		ss, err := v1alpha1.NewSealedSecret(scheme.Codecs, nil, s)
+		if err != nil {
+			return nil, err
+		}
+
+		return addTypeMeta(ss), nil
 	}
 
 	rsaPub, err := getPubKey(ctx, namespace)
@@ -38,12 +49,15 @@ func CreateSealedSecretFromSecretFile(ctx context.Context, namespace, secretPath
 		return nil, err
 	}
 
+	return addTypeMeta(ss), nil
+}
+
+func addTypeMeta(ss *v1alpha1.SealedSecret) *v1alpha1.SealedSecret {
 	ss.TypeMeta = metav1.TypeMeta{
 		Kind:       "SealedSecret",
 		APIVersion: v1alpha1.SchemeGroupVersion.String(),
 	}
-
-	return ss, nil
+	return ss
 }
 
 func getSecretFromFile(ctx context.Context, secretPath string) (*v1.Secret, error) {

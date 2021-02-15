@@ -105,11 +105,10 @@ func fillValues(opts *options) {
 
 func install(ctx context.Context, opts *options) {
 	defer func() {
+		cleanup(ctx)
 		if err := recover(); err != nil {
-			cleanup(ctx, true)
 			panic(err)
 		}
-		cleanup(ctx, false)
 	}()
 
 	tryCloneExistingRepo(ctx, opts)
@@ -125,24 +124,17 @@ func install(ctx context.Context, opts *options) {
 
 	log.G(ctx).Printf("building bootstrap resources...")
 	installBootstrapResources(ctx, opts)
-	if opts.dryRun {
-		return
-	}
 
 	log.G(ctx).Printf("waiting for argocd initialization to complete... (might take a few seconds)")
-	cferrors.CheckErr(waitForDeployments(ctx, opts))
+	waitForDeployments(ctx, opts)
 
-	cferrors.CheckErr(createSealedSecret(ctx, opts))
+	createSealedSecret(ctx, opts)
 
 	persistGitopsRepo(ctx, opts)
 
-	cferrors.CheckErr(createArgocdApp(ctx, opts))
+	createArgocdApp(ctx, opts)
 
-	passwd, err := getArgocdPassword(ctx, opts)
-	cferrors.CheckErr(err)
-
-	log.G(ctx).Printf("\n\nargocd initialized. password: %s", passwd)
-	log.G(ctx).Printf("run: kubectl port-forward -n %s svc/argocd-server 8080:80", values.Namespace)
+	printArgocdData(ctx, opts)
 }
 
 func prepareBase(ctx context.Context, opts *options) {
@@ -211,19 +203,13 @@ func tryCloneExistingRepo(ctx context.Context, opts *options) {
 	}
 }
 
-func apply(ctx context.Context, opts *options, data []byte) error {
-	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
-		Manifests: data,
-		DryRun:    opts.dryRun,
-	})
-}
-
-func waitForDeployments(ctx context.Context, opts *options) error {
+func waitForDeployments(ctx context.Context, opts *options) {
 	deploymentTest := func(ctx context.Context, cs kubernetes.Interface, ns, name string) (bool, error) {
 		d, err := cs.AppsV1().Deployments(ns).Get(ctx, name, v1.GetOptions{})
 		if err != nil {
 			return false, err
 		}
+
 		return d.Status.ReadyReplicas >= *d.Spec.Replicas, nil
 	}
 	ns := values.Namespace
@@ -245,27 +231,29 @@ func waitForDeployments(ctx context.Context, opts *options) error {
 		DryRun: opts.dryRun,
 	}
 
-	return store.Get().NewKubeClient(ctx).Wait(ctx, o)
+	cferrors.CheckErr(store.Get().NewKubeClient(ctx).Wait(ctx, o))
 }
 
-func getArgocdPassword(ctx context.Context, opts *options) (string, error) {
+func printArgocdData(ctx context.Context, opts *options) {
+	if opts.dryRun {
+		return
+	}
+
 	cs, err := store.Get().NewKubeClient(ctx).KubernetesClientSet()
-	if err != nil {
-		return "", err
-	}
+	cferrors.CheckErr(err)
+
 	secret, err := cs.CoreV1().Secrets(values.Namespace).Get(ctx, "argocd-initial-admin-secret", v1.GetOptions{})
-	if err != nil {
-		return "", err
-	}
+	cferrors.CheckErr(err)
 	passwd, ok := secret.Data["password"]
 	if !ok {
-		return "", fmt.Errorf("argocd initial password not found")
+		panic(fmt.Errorf("argocd initial password not found"))
 	}
 
-	return string(passwd), nil
+	log.G(ctx).Printf("\n\nargocd initialized. password: %s", passwd)
+	log.G(ctx).Printf("run: kubectl port-forward -n %s svc/argocd-server 8080:80", values.Namespace)
 }
 
-func createArgocdApp(ctx context.Context, opts *options) error {
+func createArgocdApp(ctx context.Context, opts *options) {
 	tplConf, err := envman.LoadConfig(values.GitopsRepoClonePath)
 	cferrors.CheckErr(err)
 	absArgoAppsDir := filepath.Join(values.GitopsRepoClonePath, filepath.Dir(tplConf.Environments[values.EnvName].RootApplicationPath))
@@ -278,27 +266,21 @@ func createArgocdApp(ctx context.Context, opts *options) error {
 
 	manifests := []byte(fmt.Sprintf("%s\n\n---\n%s", string(projData), string(appData)))
 
-	return apply(ctx, opts, manifests)
+	cferrors.CheckErr(apply(ctx, opts, manifests))
 }
 
-func createSealedSecret(ctx context.Context, opts *options) error {
+func createSealedSecret(ctx context.Context, opts *options) {
 	secretPath := filepath.Join(values.TemplateRepoClonePath, values.BootstrapDir, "secret.yaml")
-	s, err := ss.CreateSealedSecretFromSecretFile(ctx, values.Namespace, secretPath)
-	if err != nil {
-		return err
-	}
+	s, err := ss.CreateSealedSecretFromSecretFile(ctx, values.Namespace, secretPath, opts.dryRun)
+	cferrors.CheckErr(err)
 
 	data, err := json.Marshal(s)
-	if err != nil {
-		return err
-	}
+	cferrors.CheckErr(err)
 
 	err = apply(ctx, opts, data)
-	if err != nil {
-		return err
-	}
+	cferrors.CheckErr(err)
 
-	return ioutil.WriteFile(
+	cferrors.CheckErr(ioutil.WriteFile(
 		filepath.Join(
 			values.TemplateRepoClonePath,
 			"kustomize",
@@ -310,7 +292,7 @@ func createSealedSecret(ctx context.Context, opts *options) error {
 		),
 		data,
 		0644,
-	)
+	))
 }
 
 func installBootstrapResources(ctx context.Context, opts *options) {
@@ -337,6 +319,10 @@ func installBootstrapResources(ctx context.Context, opts *options) {
 }
 
 func persistGitopsRepo(ctx context.Context, opts *options) {
+	if opts.dryRun {
+		return
+	}
+
 	hasRemotes, err := values.GitopsRepo.HasRemotes()
 	cferrors.CheckErr(err)
 
@@ -387,6 +373,13 @@ func addToExistingGitopsRepo(ctx context.Context, opts *options) {
 	cferrors.CheckErr(err)
 }
 
+func apply(ctx context.Context, opts *options, data []byte) error {
+	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
+		Manifests: data,
+		DryRun:    opts.dryRun,
+	})
+}
+
 func createRemoteRepo(ctx context.Context, opts *options) (string, error) {
 	p, err := git.New(&git.Options{
 		Type: "github", // need to support other types
@@ -410,7 +403,7 @@ func createRemoteRepo(ctx context.Context, opts *options) (string, error) {
 	return cloneURL, err
 }
 
-func cleanup(ctx context.Context, failed bool) {
+func cleanup(ctx context.Context) {
 	log.G(ctx).Debugf("cleaning dirs: %s", strings.Join([]string{values.GitopsRepoClonePath, values.TemplateRepoClonePath}, ","))
 	if err := os.RemoveAll(values.GitopsRepoClonePath); err != nil && !os.IsNotExist(err) {
 		log.G(ctx).WithError(err).Error("failed to clean user local repo")
