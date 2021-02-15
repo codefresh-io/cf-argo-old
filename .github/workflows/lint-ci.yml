@@ -17,6 +17,9 @@ jobs:
       uses: actions/setup-go@v2
       with:
         go-version: 1.15
+        
+    - name: Export gopath
+      run: echo "/home/runner/work/go/bin" >> $GITHUB_PATH
 
     - name: Build
       run: make
@@ -27,5 +30,4 @@ jobs:
       run: make lint
       env:
         GOPATH: /home/runner/work/go
-        PATH: $PATH:/home/runner/work/go/bin
 
