@@ -23,8 +23,8 @@ jobs:
       env:
         GOPATH: /home/runner/work/go
 
-    - name: Build
-      run: lint
+    - name: Lint
+      run: make lint
       env:
         GOPATH: /home/runner/work/go
 
