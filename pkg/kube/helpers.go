@@ -125,11 +125,7 @@ func (c *client) delete(ctx context.Context, opts *DeleteOptions) error {
 		Use:   "delete",
 		Short: "Delete resources by filenames, stdin, resources and names, or by resources and label selector",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o, err := deleteFlags.ToOptions(nil, ios)
-			if err != nil {
-				return err
-			}
-
+			o := deleteFlags.ToOptions(nil, ios)
 			if opts.DryRun {
 				o.DryRunStrategy = kcmdutil.DryRunClient
 				o.Output = "yaml"
@@ -137,7 +133,7 @@ func (c *client) delete(ctx context.Context, opts *DeleteOptions) error {
 
 			o.Filenames = []string{opts.FileName}
 			o.WaitForDeletion = true
-			err = o.Complete(c, args, cmd)
+			err := o.Complete(c, args, cmd)
 			if err != nil {
 				return err
 			}
