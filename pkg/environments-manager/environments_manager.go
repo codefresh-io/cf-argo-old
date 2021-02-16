@@ -45,6 +45,7 @@ type (
 		c                   *Config
 		name                string
 		RootApplicationPath string `json:"rootAppPath"`
+		TemplateRef         string `json:"templateRef"`
 	}
 
 	Application struct {
@@ -89,20 +90,29 @@ func (c *Config) AddEnvironmentP(env *Environment) error {
 }
 
 // DeleteEnvironmentP deletes an environment and persists the config object
-func (c *Config) DeleteEnvironmentP(name string) error {
+func (c *Config) DeleteEnvironmentP(name string) (*Application, error) {
 	env, exists := c.Environments[name]
 	if !exists {
-		return ErrEnvironmentNotExist
+		return nil, ErrEnvironmentNotExist
 	}
 
-	err := env.uninstall()
+	rootApp, err := env.uninstall()
 	if err != nil {
-		return err
+		return rootApp, err
+	}
+
+	if rootApp != nil {
+		projectPath := filepath.Join(c.path, filepath.Dir(env.RootApplicationPath), fmt.Sprintf("%s-project.yaml", name))
+		err = os.Remove(projectPath)
+		if err != nil {
+			return rootApp, err
+		}
 	}
 
 	delete(c.Environments, name)
 
-	return c.Persist()
+	err = c.Persist()
+	return rootApp, err
 }
 
 func (c *Config) FirstEnv() *Environment {
@@ -218,13 +228,18 @@ func (e *Environment) installNewApp(srcRootPath string, app *Application) error 
 	return helpers.CopyDir(absSrc, absDst)
 }
 
-func (e *Environment) uninstall() error {
+func (e *Environment) uninstall() (*Application, error) {
 	rootApp, err := e.getRootApp()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return rootApp.uninstall()
+	uninstalled, err := rootApp.uninstall(e.c.path)
+	if uninstalled {
+		return rootApp, err
+	}
+
+	return nil, err
 }
 
 func (e *Environment) leafApps() ([]*Application, error) {
@@ -274,7 +289,7 @@ func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*A
 			continue
 		}
 
-		if !app.isManagedBy() {
+		if !app.isManagedByCf() {
 			continue
 		}
 
@@ -328,7 +343,7 @@ func (a *Application) cfName() string {
 	return a.labelValue(labelsCfName)
 }
 
-func (a *Application) isManagedBy() bool {
+func (a *Application) isManagedByCf() bool {
 	return a.labelValue(labelsManagedBy) == "codefresh.io"
 }
 
@@ -366,12 +381,70 @@ func (a *Application) save() error {
 }
 
 func (a *Application) leafApps(rootPath string) ([]*Application, error) {
-	filenames, err := filepath.Glob(filepath.Join(rootPath, a.srcPath(), "*.yaml"))
+	childApps, err := a.childApps(rootPath)
 	if err != nil {
 		return nil, err
 	}
 
 	isLeaf := true
+	res := []*Application{}
+	for _, childApp := range childApps {
+		isLeaf = false
+		if childApp.isManagedByCf() {
+			childRes, err := childApp.leafApps(rootPath)
+			if err != nil {
+				return nil, err
+			}
+
+			res = append(res, childRes...)
+		}
+	}
+
+	if isLeaf && a.isManagedByCf() {
+		res = append(res, a)
+	}
+
+	return res, nil
+}
+
+func (a *Application) uninstall(rootPath string) (bool, error) {
+	uninstalled := false
+	childApps, err := a.childApps(rootPath)
+	if err != nil {
+		return uninstalled, err
+	}
+
+	totalUninstalled := 0
+	for _, childApp := range childApps {
+		if childApp.isManagedByCf() {
+			childUninstalled, err := childApp.uninstall(rootPath)
+			if err != nil {
+				return uninstalled, err
+			}
+
+			if childUninstalled {
+				totalUninstalled++
+			}
+		}
+	}
+
+	uninstalled = len(childApps) == totalUninstalled
+	if uninstalled {
+		err = os.Remove(a.path)
+		if err != nil {
+			return uninstalled, err
+		}
+	}
+
+	return uninstalled, nil
+}
+
+func (a *Application) childApps(rootPath string) ([]*Application, error) {
+	filenames, err := filepath.Glob(filepath.Join(rootPath, a.srcPath(), "*.yaml"))
+	if err != nil {
+		return nil, err
+	}
+
 	res := []*Application{}
 	for _, f := range filenames {
 		childApp, err := getAppFromFile(f)
@@ -380,23 +453,10 @@ func (a *Application) leafApps(rootPath string) ([]*Application, error) {
 			continue
 		}
 
-		if childApp != nil && childApp.isManagedBy() {
-			isLeaf = false
-			childRes, err := childApp.leafApps(rootPath)
-			if err != nil {
-				return nil, err
-			}
-			res = append(res, childRes...)
+		if childApp != nil {
+			res = append(res, childApp)
 		}
 	}
 
-	if isLeaf && a.isManagedBy() {
-		res = append(res, a)
-	}
-
 	return res, nil
-}
-
-func (a *Application) uninstall() error {
-	return nil
 }

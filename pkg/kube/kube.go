@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/homedir"
 	kcmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
@@ -35,7 +34,7 @@ type (
 	ResourceInfo struct {
 		Name      string
 		Namespace string
-		Func      func(ctx context.Context, cs kubernetes.Interface, ns, name string) (bool, error)
+		Func      func(ctx context.Context, c Client, ns, name string) (bool, error)
 	}
 
 	WaitOptions struct {

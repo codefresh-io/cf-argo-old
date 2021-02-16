@@ -2,14 +2,23 @@ package uninstall
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"time"
 
 	envman "github.com/codefresh-io/cf-argo/pkg/environments-manager"
 	cferrors "github.com/codefresh-io/cf-argo/pkg/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/argoproj/argo-cd/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/pkg/client/clientset/versioned"
 	"github.com/codefresh-io/cf-argo/pkg/git"
 	"github.com/codefresh-io/cf-argo/pkg/kube"
+	"github.com/codefresh-io/cf-argo/pkg/log"
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 type options struct {
@@ -24,6 +33,7 @@ var values struct {
 	RepoOwner           string
 	GitopsRepoClonePath string
 	GitopsRepo          git.Repository
+	CommitRev           string
 }
 
 func New(ctx context.Context) *cobra.Command {
@@ -64,6 +74,13 @@ func fillValues(opts *options) {
 }
 
 func uninstall(ctx context.Context, opts *options) {
+	defer func() {
+		cleanup(ctx)
+		if err := recover(); err != nil {
+			panic(err)
+		}
+	}()
+
 	var err error
 	values.GitopsRepo, err = git.CloneExistingRepo(ctx, values.RepoOwner, values.RepoName, opts.gitToken)
 	cferrors.CheckErr(err)
@@ -71,9 +88,94 @@ func uninstall(ctx context.Context, opts *options) {
 	values.GitopsRepoClonePath, err = values.GitopsRepo.Root()
 	cferrors.CheckErr(err)
 
-	_, err = envman.LoadConfig(values.GitopsRepoClonePath)
+	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
 	cferrors.CheckErr(err)
 
+	rootApp, err := conf.DeleteEnvironmentP(opts.envName)
+	cferrors.CheckErr(err)
+
+	persistGitopsRepo(ctx, opts)
+
+	if rootApp != nil {
+		log.G(ctx).Printf("waiting for root application sync... (might take a few seconds)")
+		awaitSync(ctx, opts, rootApp)
+		log.G(ctx).Printf("deleting root application")
+		// delete root app (or root project ?)
+		// wait for delete
+		// generate bootstrap manifest ( - need to also fix install to render it from git, instead of local fs)
+		// render manifest in memory
+		// delete manifest from cluster
+		log.G(ctx).Printf("all Codefresh resources in '%s' have been removed, including argo-cd", opts.envName)
+	} else {
+		log.G(ctx).Printf("all Codefresh resources in '%s' have been removed, argo-cd and user Applications remain on cluster", opts.envName)
+	}
+}
+
+func persistGitopsRepo(ctx context.Context, opts *options) {
+	var err error
+	cferrors.CheckErr(values.GitopsRepo.Add(ctx, "."))
+
+	values.CommitRev, err = values.GitopsRepo.Commit(ctx, fmt.Sprintf("uninstalled environment %s", opts.envName))
+	cferrors.CheckErr(err)
+
+	log.G(ctx).Printf("pushing to gitops repo...")
+	err = values.GitopsRepo.Push(ctx, &git.PushOptions{
+		Auth: &git.Auth{
+			Password: opts.gitToken,
+		},
+	})
+	cferrors.CheckErr(err)
+}
+
+func awaitSync(ctx context.Context, opts *options, app *envman.Application) {
+	awaitAppCondition(ctx, opts, app, func(a *v1alpha1.Application, err error) (bool, error) {
+		if err != nil {
+			return false, err
+		}
+
+		return a.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced && a.Status.Sync.Revision == values.CommitRev, nil
+	})
+}
+
+func awaitDeletion(ctx context.Context, opts *options, app *envman.Application) {
+	awaitAppCondition(ctx, opts, app, func(a *v1alpha1.Application, err error) (bool, error) {
+		if err != nil {
+			if kerrors.IsGone(err) {
+				return true, nil
+			}
+
+			return false, err
+		}
+		return false, nil
+	})
+}
+
+func awaitAppCondition(ctx context.Context, opts *options, rootApp *envman.Application, predicate func(*v1alpha1.Application, error) (bool, error)) {
+	o := &kube.WaitOptions{
+		Interval: time.Second * 2,
+		Timeout:  time.Minute * 2,
+		Resources: []*kube.ResourceInfo{
+			{
+				Name:      rootApp.Name,
+				Namespace: rootApp.Namespace,
+				Func: func(ctx context.Context, c kube.Client, ns, name string) (bool, error) {
+					config, err := c.ToRESTConfig()
+					if err != nil {
+						return false, err
+					}
+
+					argoClient, err := versioned.NewForConfig(config)
+					if err != nil {
+						return false, err
+					}
+
+					return predicate(argoClient.ArgoprojV1alpha1().Applications(ns).Get(ctx, name, v1.GetOptions{}))
+				},
+			},
+		},
+	}
+
+	cferrors.CheckErr(store.Get().NewKubeClient(ctx).Wait(ctx, o))
 }
 
 func delete(ctx context.Context, opts *options, filename string) error {
@@ -81,4 +183,11 @@ func delete(ctx context.Context, opts *options, filename string) error {
 		FileName: filename,
 		DryRun:   false,
 	})
+}
+
+func cleanup(ctx context.Context) {
+	log.G(ctx).Debugf("cleaning dir: %s", values.GitopsRepoClonePath)
+	if err := os.RemoveAll(values.GitopsRepoClonePath); err != nil && !os.IsNotExist(err) {
+		log.G(ctx).WithError(err).Error("failed to clean user local repo")
+	}
 }

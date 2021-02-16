@@ -156,10 +156,6 @@ func (c *client) wait(ctx context.Context, opts *WaitOptions) error {
 		log.G(ctx).Debug("running in dry run mode, no wait")
 		return nil
 	}
-	cs, err := c.KubernetesClientSet()
-	if err != nil {
-		return err
-	}
 
 	itr := 0
 
@@ -187,7 +183,7 @@ func (c *client) wait(ctx context.Context, opts *WaitOptions) error {
 				"namespace": r.Namespace,
 			})
 			ll.Debug("checking resource readiness")
-			ready, err := r.Func(ctx, cs, r.Namespace, r.Name)
+			ready, err := r.Func(ctx, c, r.Namespace, r.Name)
 			if err != nil {
 				ll.WithError(err).Debug("resource not ready")
 				continue
