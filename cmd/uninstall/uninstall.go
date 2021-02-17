@@ -2,6 +2,7 @@ package uninstall
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"time"
@@ -34,6 +35,13 @@ var values struct {
 	GitopsRepoClonePath string
 	GitopsRepo          git.Repository
 	CommitRev           string
+}
+
+var renderValues struct {
+	EnvName   string
+	RepoOwner string
+	RepoName  string
+	GitToken  string
 }
 
 func New(ctx context.Context) *cobra.Command {
@@ -71,6 +79,11 @@ func fillValues(opts *options) {
 	var err error
 	values.RepoOwner, values.RepoName, err = git.SplitCloneURL(opts.repoURL)
 	cferrors.CheckErr(err)
+
+	renderValues.EnvName = opts.envName
+	renderValues.RepoOwner = values.RepoOwner
+	renderValues.RepoName = values.RepoName
+	renderValues.GitToken = base64.StdEncoding.EncodeToString([]byte(opts.gitToken))
 }
 
 func uninstall(ctx context.Context, opts *options) {
@@ -91,20 +104,28 @@ func uninstall(ctx context.Context, opts *options) {
 	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
 	cferrors.CheckErr(err)
 
-	rootApp, err := conf.DeleteEnvironmentP(opts.envName)
+	env, exists := conf.Environments[opts.envName]
+	if !exists {
+		panic(envman.ErrEnvironmentNotExist)
+	}
+
+	rootApp, err := env.Uninstall()
 	cferrors.CheckErr(err)
 
 	persistGitopsRepo(ctx, opts, fmt.Sprintf("uninstalled environment %s", opts.envName))
 
 	if rootApp != nil {
 		log.G(ctx).Printf("waiting for root application sync... (might take a few seconds)")
-		awaitSync(ctx, opts, rootApp)
+		awaitSync(ctx, rootApp)
 
 		log.G(ctx).Printf("deleting root application")
 		deleteRootResources(ctx, rootApp)
 
 		log.G(ctx).Printf("cleaning up the repo")
-		cferrors.CheckErr(conf.CleanupEnv(opts.envName))
+
+		cferrors.CheckErr(env.DeleteBootstrap(ctx, renderValues))
+		cferrors.CheckErr(conf.DeleteEnvironmentP(opts.envName))
+
 		persistGitopsRepo(ctx, opts, fmt.Sprintf("cleanup %s resources", opts.envName))
 
 		// generate bootstrap manifest ( - need to also fix install to render it from git, instead of local fs)
@@ -125,6 +146,7 @@ func deleteRootResources(ctx context.Context, app *envman.Application) {
 	cferrors.CheckErr(c.ArgoprojV1alpha1().AppProjects(app.Namespace).Delete(ctx, app.Name, v1.DeleteOptions{
 		PropagationPolicy: &deletePolicy,
 	}))
+	awaitDeletion(ctx, app)
 }
 
 func newArgoCdClient(ctx context.Context) *versioned.Clientset {
@@ -152,8 +174,8 @@ func persistGitopsRepo(ctx context.Context, opts *options, msg string) {
 	cferrors.CheckErr(err)
 }
 
-func awaitSync(ctx context.Context, opts *options, app *envman.Application) {
-	awaitAppCondition(ctx, opts, app, func(a *v1alpha1.Application, err error) (bool, error) {
+func awaitSync(ctx context.Context, app *envman.Application) {
+	awaitAppCondition(ctx, app, func(a *v1alpha1.Application, err error) (bool, error) {
 		if err != nil {
 			return false, err
 		}
@@ -162,8 +184,8 @@ func awaitSync(ctx context.Context, opts *options, app *envman.Application) {
 	})
 }
 
-func awaitDeletion(ctx context.Context, opts *options, app *envman.Application) {
-	awaitAppCondition(ctx, opts, app, func(a *v1alpha1.Application, err error) (bool, error) {
+func awaitDeletion(ctx context.Context, app *envman.Application) {
+	awaitAppCondition(ctx, app, func(a *v1alpha1.Application, err error) (bool, error) {
 		if err != nil {
 			if kerrors.IsGone(err) {
 				return true, nil
@@ -175,7 +197,7 @@ func awaitDeletion(ctx context.Context, opts *options, app *envman.Application) 
 	})
 }
 
-func awaitAppCondition(ctx context.Context, opts *options, rootApp *envman.Application, predicate func(*v1alpha1.Application, error) (bool, error)) {
+func awaitAppCondition(ctx context.Context, rootApp *envman.Application, predicate func(*v1alpha1.Application, error) (bool, error)) {
 	o := &kube.WaitOptions{
 		Interval: time.Second * 2,
 		Timeout:  time.Minute * 2,

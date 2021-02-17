@@ -110,8 +110,8 @@ func (c *client) delete(ctx context.Context, opts *DeleteOptions) error {
 		return cferrors.ErrNilOpts
 	}
 
-	if opts.FileName == "" {
-		return errors.New("no filename")
+	if opts.Manifests == nil {
+		return errors.New("no manifests")
 	}
 
 	ios := genericclioptions.IOStreams{
@@ -126,12 +126,14 @@ func (c *client) delete(ctx context.Context, opts *DeleteOptions) error {
 		Short: "Delete resources by filenames, stdin, resources and names, or by resources and label selector",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o := deleteFlags.ToOptions(nil, ios)
-			if opts.DryRun {
-				o.DryRunStrategy = kcmdutil.DryRunClient
-				o.Output = "yaml"
-			}
+			fake := fakeio.StdinBytes([]byte{})
+			defer fake.Restore()
+			go func() {
+				fake.StdinBytes(opts.Manifests)
+				fake.CloseStdin()
+			}()
 
-			o.Filenames = []string{opts.FileName}
+			o.Filenames = []string{"-"}
 			o.WaitForDeletion = true
 			err := o.Complete(c, args, cmd)
 			if err != nil {

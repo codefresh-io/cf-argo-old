@@ -1,11 +1,15 @@
 package kube
 
 import (
+	"bytes"
 	"context"
+	"html/template"
 	"path/filepath"
 	"time"
 
 	"github.com/codefresh-io/cf-argo/pkg/log"
+	"sigs.k8s.io/kustomize/api/filesys"
+	"sigs.k8s.io/kustomize/api/krusty"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -53,11 +57,8 @@ type (
 	}
 
 	DeleteOptions struct {
-		// FileName the file containing the resources to delete
-		FileName string
-
-		// DryRunStrategy by default false, can be set to either "client" or "server" dry-run modes, see kubectl apply --help
-		DryRun bool
+		// IOStreams the std streams used by the apply command
+		Manifests []byte
 	}
 )
 
@@ -83,6 +84,37 @@ func NewForConfig(ctx context.Context, cfg *Config) Client {
 	}
 
 	return &client{kcmdutil.NewFactory(kcmdutil.NewMatchVersionFlags(cfg.cfg)), l}
+}
+
+func KustBuild(path string, values interface{}) ([]byte, error) {
+	kopts := krusty.MakeDefaultOptions()
+	kopts.DoLegacyResourceSort = true
+
+	k := krusty.MakeKustomizer(filesys.MakeFsOnDisk(), kopts)
+
+	res, err := k.Run(path)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := res.AsYaml()
+	if err != nil {
+		return nil, err
+	}
+
+	tpl, err := template.New("").Parse(string(data))
+	if err != nil {
+		return nil, err
+	}
+
+	buf := bytes.NewBuffer(make([]byte, 0, 4096))
+
+	err = tpl.Execute(buf, values)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
 
 func (c *client) Apply(ctx context.Context, opts *ApplyOptions) error {

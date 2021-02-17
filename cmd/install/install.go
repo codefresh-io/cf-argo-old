@@ -125,9 +125,6 @@ func install(ctx context.Context, opts *options) {
 		addToExistingGitopsRepo(ctx, opts)
 	}
 
-	log.G(ctx).Printf("building bootstrap resources...")
-	installBootstrapResources(ctx, opts)
-
 	log.G(ctx).Printf("waiting for argocd initialization to complete... (might take a few seconds)")
 	waitForDeployments(ctx, opts)
 
@@ -377,6 +374,8 @@ func initializeNewGitopsRepo(ctx context.Context, opts *options) {
 	env := conf.FirstEnv()
 	env.TemplateRef = opts.baseRepo
 	cferrors.CheckErr(conf.Persist())
+	log.G(ctx).Printf("installing bootstrap resources...")
+	cferrors.CheckErr(env.ApplyBootstrap(ctx, renderValues, opts.dryRun))
 }
 
 func addToExistingGitopsRepo(ctx context.Context, opts *options) {
@@ -393,6 +392,8 @@ func addToExistingGitopsRepo(ctx context.Context, opts *options) {
 	env := tplConf.FirstEnv()
 	env.TemplateRef = opts.baseRepo
 	cferrors.CheckErr(conf.AddEnvironmentP(env))
+	log.G(ctx).Printf("installing bootstrap resources...")
+	cferrors.CheckErr(env.ApplyBootstrap(ctx, renderValues, opts.dryRun))
 }
 
 func apply(ctx context.Context, opts *options, data []byte) error {

@@ -1,6 +1,7 @@
 package environments_manager
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/argoproj/argo-cd/pkg/apis/application/v1alpha1"
 	"github.com/codefresh-io/cf-argo/pkg/helpers"
+	"github.com/codefresh-io/cf-argo/pkg/kube"
+	"github.com/codefresh-io/cf-argo/pkg/store"
 	"github.com/ghodss/yaml"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kustomize "sigs.k8s.io/kustomize/api/types"
@@ -90,32 +93,13 @@ func (c *Config) AddEnvironmentP(env *Environment) error {
 }
 
 // DeleteEnvironmentP deletes an environment and persists the config object
-func (c *Config) DeleteEnvironmentP(name string) (*Application, error) {
-	env, exists := c.Environments[name]
-	if !exists {
-		return nil, ErrEnvironmentNotExist
-	}
-
-	rootApp, err := env.uninstall()
-	if err != nil {
-		return rootApp, err
-	}
-
-	if rootApp == nil {
-		delete(c.Environments, name)
-		err = c.Persist()
-	}
-
-	return rootApp, err
-}
-
-func (c *Config) CleanupEnv(name string) error {
+func (c *Config) DeleteEnvironmentP(name string) error {
 	env, exists := c.Environments[name]
 	if !exists {
 		return ErrEnvironmentNotExist
 	}
 
-	err := env.cleanup()
+	err := env.Cleanup()
 	if err != nil {
 		return err
 	}
@@ -199,7 +183,40 @@ func (c *Config) getAppByName(appName string) (*Application, error) {
 	return app, err
 }
 
-func (e *Environment) cleanup() error {
+func (e *Environment) ApplyBootstrap(ctx context.Context, values interface{}, dryRun bool) error {
+	manifests, err := kube.KustBuild(e.bootstrapUrl(), values)
+	if err != nil {
+		return err
+	}
+
+	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
+		Manifests: manifests,
+		DryRun:    dryRun,
+	})
+}
+
+func (e *Environment) DeleteBootstrap(ctx context.Context, values interface{}) error {
+	manifests, err := kube.KustBuild(e.bootstrapUrl(), values)
+	if err != nil {
+		return err
+	}
+
+	return store.Get().NewKubeClient(ctx).Delete(ctx, &kube.DeleteOptions{
+		Manifests: manifests,
+	})
+}
+
+func (e *Environment) bootstrapUrl() string {
+	parts := strings.Split(e.TemplateRef, "#")
+	bootstrapUrl := fmt.Sprintf("%s/bootstrap", parts[0])
+	if len(parts) > 1 {
+		bootstrapUrl = fmt.Sprintf("%s?ref=%s", bootstrapUrl, parts[1])
+	}
+
+	return bootstrapUrl
+}
+
+func (e *Environment) Cleanup() error {
 	rootApp, err := e.getRootApp()
 	if err != nil {
 		return err
@@ -246,7 +263,7 @@ func (e *Environment) installNewApp(srcRootPath string, app *Application) error 
 	return helpers.CopyDir(absSrc, absDst)
 }
 
-func (e *Environment) uninstall() (*Application, error) {
+func (e *Environment) Uninstall() (*Application, error) {
 	rootApp, err := e.getRootApp()
 	if err != nil {
 		return rootApp, err
