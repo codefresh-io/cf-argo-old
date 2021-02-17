@@ -1,7 +1,6 @@
 package install
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -10,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
 	"time"
 
 	envman "github.com/codefresh-io/cf-argo/pkg/environments-manager"
@@ -25,8 +23,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/kustomize/api/filesys"
-	"sigs.k8s.io/kustomize/api/krusty"
 )
 
 type options struct {
@@ -298,35 +294,6 @@ func createSealedSecret(ctx context.Context, opts *options) {
 		data,
 		0644,
 	))
-}
-
-func installBootstrapResources(ctx context.Context, opts *options) {
-	kopts := krusty.MakeDefaultOptions()
-	kopts.DoLegacyResourceSort = true
-
-	k := krusty.MakeKustomizer(filesys.MakeFsOnDisk(), kopts)
-	parts := strings.Split(opts.baseRepo, "#")
-	bootstrapUrl := fmt.Sprintf("%s/bootstrap", parts[0])
-	if len(parts) > 1 {
-		bootstrapUrl = fmt.Sprintf("%s?ref=%s", bootstrapUrl, parts[1])
-	}
-
-	res, err := k.Run(bootstrapUrl)
-	cferrors.CheckErr(err)
-
-	data, err := res.AsYaml()
-	cferrors.CheckErr(err)
-
-	tpl, err := template.New("").Parse(string(data))
-	cferrors.CheckErr(err)
-
-	buf := bytes.NewBuffer(make([]byte, 0, 4096))
-
-	cferrors.CheckErr(tpl.Execute(buf, renderValues))
-
-	manifests := buf.Bytes()
-
-	cferrors.CheckErr(apply(ctx, opts, manifests))
 }
 
 func persistGitopsRepo(ctx context.Context, opts *options) {
