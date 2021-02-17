@@ -50,7 +50,7 @@ type (
 
 	Application struct {
 		*v1alpha1.Application
-		path string
+		Path string
 	}
 )
 
@@ -101,18 +101,27 @@ func (c *Config) DeleteEnvironmentP(name string) (*Application, error) {
 		return rootApp, err
 	}
 
-	if rootApp != nil {
-		projectPath := filepath.Join(c.path, filepath.Dir(env.RootApplicationPath), fmt.Sprintf("%s-project.yaml", name))
-		err = os.Remove(projectPath)
-		if err != nil {
-			return rootApp, err
-		}
+	if rootApp == nil {
+		delete(c.Environments, name)
+		err = c.Persist()
+	}
+
+	return rootApp, err
+}
+
+func (c *Config) CleanupEnv(name string) error {
+	env, exists := c.Environments[name]
+	if !exists {
+		return ErrEnvironmentNotExist
+	}
+
+	err := env.cleanup()
+	if err != nil {
+		return err
 	}
 
 	delete(c.Environments, name)
-
-	err = c.Persist()
-	return rootApp, err
+	return c.Persist()
 }
 
 func (c *Config) FirstEnv() *Environment {
@@ -190,6 +199,15 @@ func (c *Config) getAppByName(appName string) (*Application, error) {
 	return app, err
 }
 
+func (e *Environment) cleanup() error {
+	rootApp, err := e.getRootApp()
+	if err != nil {
+		return err
+	}
+
+	return rootApp.deleteFromFilesystem(e.c.path)
+}
+
 func (e *Environment) installApp(srcRootPath string, app *Application) error {
 	appName := app.cfName()
 	refApp, err := e.c.getAppByName(appName)
@@ -231,12 +249,12 @@ func (e *Environment) installNewApp(srcRootPath string, app *Application) error 
 func (e *Environment) uninstall() (*Application, error) {
 	rootApp, err := e.getRootApp()
 	if err != nil {
-		return nil, err
+		return rootApp, err
 	}
 
 	uninstalled, err := rootApp.uninstall(e.c.path)
 	if uninstalled {
-		return rootApp, err
+		return rootApp, createDummy(filepath.Join(e.c.path, rootApp.srcPath()))
 	}
 
 	return nil, err
@@ -331,6 +349,27 @@ func getAppFromFile(path string) (*Application, error) {
 	return nil, nil
 }
 
+func (a *Application) deleteFromFilesystem(rootPath string) error {
+	srcDir := filepath.Join(rootPath, a.srcPath())
+	err := os.RemoveAll(srcDir)
+	if err != nil {
+		return err
+	}
+
+	projectPath := filepath.Join(filepath.Dir(a.Path), fmt.Sprintf("%s-project.yaml", a.Name))
+	err = os.Remove(projectPath)
+	if err != nil {
+		return err
+	}
+
+	err = os.Remove(a.Path)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (a *Application) srcPath() string {
 	return a.Spec.Source.Path
 }
@@ -377,7 +416,7 @@ func (a *Application) save() error {
 		return err
 	}
 
-	return ioutil.WriteFile(a.path, data, 0644)
+	return ioutil.WriteFile(a.Path, data, 0644)
 }
 
 func (a *Application) leafApps(rootPath string) ([]*Application, error) {
@@ -423,19 +462,17 @@ func (a *Application) uninstall(rootPath string) (bool, error) {
 			}
 
 			if childUninstalled {
+				err = os.Remove(childApp.Path)
+				if err != nil {
+					return uninstalled, err
+				}
+
 				totalUninstalled++
 			}
 		}
 	}
 
 	uninstalled = len(childApps) == totalUninstalled
-	if uninstalled {
-		err = os.Remove(a.path)
-		if err != nil {
-			return uninstalled, err
-		}
-	}
-
 	return uninstalled, nil
 }
 
@@ -459,4 +496,12 @@ func (a *Application) childApps(rootPath string) ([]*Application, error) {
 	}
 
 	return res, nil
+}
+
+func createDummy(path string) error {
+	file, err := os.Create(filepath.Join(path, "DUMMY"))
+	if err != nil {
+		return err
+	}
+	return file.Close()
 }

@@ -223,7 +223,7 @@ func waitForDeployments(ctx context.Context, opts *options) {
 	ns := values.Namespace
 	o := &kube.WaitOptions{
 		Interval: time.Second * 2,
-		Timeout:  time.Minute * 2,
+		Timeout:  time.Minute * 20,
 		Resources: []*kube.ResourceInfo{
 			{
 				Name:      "argocd-server",

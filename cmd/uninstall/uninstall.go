@@ -94,14 +94,19 @@ func uninstall(ctx context.Context, opts *options) {
 	rootApp, err := conf.DeleteEnvironmentP(opts.envName)
 	cferrors.CheckErr(err)
 
-	persistGitopsRepo(ctx, opts)
+	persistGitopsRepo(ctx, opts, fmt.Sprintf("uninstalled environment %s", opts.envName))
 
 	if rootApp != nil {
 		log.G(ctx).Printf("waiting for root application sync... (might take a few seconds)")
 		awaitSync(ctx, opts, rootApp)
+
 		log.G(ctx).Printf("deleting root application")
-		// delete root app (or root project ?)
-		// wait for delete
+		deleteRootResources(ctx, rootApp)
+
+		log.G(ctx).Printf("cleaning up the repo")
+		cferrors.CheckErr(conf.CleanupEnv(opts.envName))
+		persistGitopsRepo(ctx, opts, fmt.Sprintf("cleanup %s resources", opts.envName))
+
 		// generate bootstrap manifest ( - need to also fix install to render it from git, instead of local fs)
 		// render manifest in memory
 		// delete manifest from cluster
@@ -111,11 +116,31 @@ func uninstall(ctx context.Context, opts *options) {
 	}
 }
 
-func persistGitopsRepo(ctx context.Context, opts *options) {
+func deleteRootResources(ctx context.Context, app *envman.Application) {
+	c := newArgoCdClient(ctx)
+	deletePolicy := v1.DeletePropagationForeground
+	cferrors.CheckErr(c.ArgoprojV1alpha1().Applications(app.Namespace).Delete(ctx, app.Name, v1.DeleteOptions{
+		PropagationPolicy: &deletePolicy,
+	}))
+	cferrors.CheckErr(c.ArgoprojV1alpha1().AppProjects(app.Namespace).Delete(ctx, app.Name, v1.DeleteOptions{
+		PropagationPolicy: &deletePolicy,
+	}))
+}
+
+func newArgoCdClient(ctx context.Context) *versioned.Clientset {
+	conf, err := store.Get().NewKubeClient(ctx).ToRESTConfig()
+	cferrors.CheckErr(err)
+
+	c, err := versioned.NewForConfig(conf)
+	cferrors.CheckErr(err)
+	return c
+}
+
+func persistGitopsRepo(ctx context.Context, opts *options, msg string) {
 	var err error
 	cferrors.CheckErr(values.GitopsRepo.Add(ctx, "."))
 
-	values.CommitRev, err = values.GitopsRepo.Commit(ctx, fmt.Sprintf("uninstalled environment %s", opts.envName))
+	values.CommitRev, err = values.GitopsRepo.Commit(ctx, msg)
 	cferrors.CheckErr(err)
 
 	log.G(ctx).Printf("pushing to gitops repo...")
@@ -176,13 +201,6 @@ func awaitAppCondition(ctx context.Context, opts *options, rootApp *envman.Appli
 	}
 
 	cferrors.CheckErr(store.Get().NewKubeClient(ctx).Wait(ctx, o))
-}
-
-func delete(ctx context.Context, opts *options, filename string) error {
-	return store.Get().NewKubeClient(ctx).Delete(ctx, &kube.DeleteOptions{
-		FileName: filename,
-		DryRun:   false,
-	})
 }
 
 func cleanup(ctx context.Context) {
