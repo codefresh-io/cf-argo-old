@@ -49,7 +49,14 @@ func CopyDir(source, destination string) error {
 		}
 
 		if info.IsDir() {
-			return os.Mkdir(absDst, info.Mode())
+			err = os.Mkdir(absDst, info.Mode())
+			if err != nil {
+				if os.IsExist(err.(*os.PathError).Unwrap()) {
+					return nil
+				}
+			}
+
+			return err
 		} else {
 			data, err := ioutil.ReadFile(path)
 			if err != nil {
@@ -67,10 +74,8 @@ func ensureDir(path string) error {
 		if !os.IsNotExist(err) {
 			return err
 		}
-		err = os.MkdirAll(dstDir, 0755)
-		if err != nil {
-			return err
-		}
+
+		return os.MkdirAll(dstDir, 0755)
 	}
 
 	return nil

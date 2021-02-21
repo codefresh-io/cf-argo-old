@@ -99,7 +99,7 @@ func (c *Config) DeleteEnvironmentP(name string) error {
 		return ErrEnvironmentNotExist
 	}
 
-	err := env.Cleanup()
+	err := env.cleanup()
 	if err != nil {
 		return err
 	}
@@ -147,6 +147,7 @@ func (c *Config) installEnv(env *Environment) (*Environment, error) {
 	newEnv := &Environment{
 		name:                env.name,
 		c:                   c,
+		TemplateRef:         env.TemplateRef,
 		RootApplicationPath: env.RootApplicationPath,
 	}
 	for _, la := range lapps {
@@ -157,7 +158,14 @@ func (c *Config) installEnv(env *Environment) (*Environment, error) {
 
 	// copy the tpl "argocd-apps" to the matching dir in the dst repo
 	src := filepath.Join(env.c.path, filepath.Dir(env.RootApplicationPath))
-	dst := filepath.Join(c.path, filepath.Dir(c.FirstEnv().RootApplicationPath))
+	var dstApplicationPath string
+	if len(c.Environments) == 0 {
+		dstApplicationPath = filepath.Dir(newEnv.RootApplicationPath)
+	} else {
+		dstApplicationPath = c.FirstEnv().RootApplicationPath
+	}
+
+	dst := filepath.Join(c.path, dstApplicationPath)
 	err = helpers.CopyDir(src, dst)
 	if err != nil {
 		return nil, err
@@ -167,7 +175,7 @@ func (c *Config) installEnv(env *Environment) (*Environment, error) {
 }
 
 func (c *Config) getAppByName(appName string) (*Application, error) {
-	var err error
+	err := ErrAppNotFound
 	var app *Application
 
 	for _, e := range c.Environments {
@@ -175,6 +183,7 @@ func (c *Config) getAppByName(appName string) (*Application, error) {
 		if err != nil && !errors.Is(err, ErrAppNotFound) {
 			return nil, err
 		}
+
 		if app != nil {
 			return app, nil
 		}
@@ -195,7 +204,7 @@ func (e *Environment) ApplyBootstrap(ctx context.Context, values interface{}, dr
 	})
 }
 
-func (e *Environment) DeleteBootstrap(ctx context.Context, values interface{}) error {
+func (e *Environment) DeleteBootstrap(ctx context.Context, values interface{}, dryRun bool) error {
 	manifests, err := kube.KustBuild(e.bootstrapUrl(), values)
 	if err != nil {
 		return err
@@ -203,7 +212,12 @@ func (e *Environment) DeleteBootstrap(ctx context.Context, values interface{}) e
 
 	return store.Get().NewKubeClient(ctx).Delete(ctx, &kube.DeleteOptions{
 		Manifests: manifests,
+		DryRun:    dryRun,
 	})
+}
+
+func (e *Environment) UpdateTemplateRef(templateRef string) {
+	e.TemplateRef = templateRef
 }
 
 func (e *Environment) bootstrapUrl() string {
@@ -216,7 +230,7 @@ func (e *Environment) bootstrapUrl() string {
 	return bootstrapUrl
 }
 
-func (e *Environment) Cleanup() error {
+func (e *Environment) cleanup() error {
 	rootApp, err := e.getRootApp()
 	if err != nil {
 		return err

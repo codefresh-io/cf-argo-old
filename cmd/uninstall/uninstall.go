@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"path/filepath"
 	"time"
 
 	envman "github.com/codefresh-io/cf-argo/pkg/environments-manager"
@@ -26,6 +28,7 @@ type options struct {
 	repoURL  string
 	envName  string
 	gitToken string
+	dryRun   bool
 }
 
 var values struct {
@@ -49,8 +52,8 @@ func New(ctx context.Context) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "uninstall",
-		Short: "uninstalls an Argo Enterprise solution from a specified cluster and installation",
-		Long:  "this command will clear all Argo-CD managed resources relating to a specific installation, from a specific cluster",
+		Short: "Uninstalls an Argo Enterprise solution from a specified cluster and installation",
+		Long:  "This command will clear all Argo-CD managed resources relating to a specific installation, from a specific cluster",
 		Run: func(cmd *cobra.Command, args []string) {
 			fillValues(&opts)
 			uninstall(ctx, &opts)
@@ -63,10 +66,12 @@ func New(ctx context.Context) *cobra.Command {
 	_ = viper.BindEnv("repo-url", "REPO_URL")
 	_ = viper.BindEnv("env-name", "ENV_NAME")
 	_ = viper.BindEnv("git-token", "GIT_TOKEN")
+	viper.SetDefault("dry-run", false)
 
 	cmd.Flags().StringVar(&opts.repoURL, "repo-url", viper.GetString("repo-url"), "the gitops repository url. If it does not exist we will try to create it for you [REPO_URL]")
 	cmd.Flags().StringVar(&opts.envName, "env-name", viper.GetString("env-name"), "name of the Argo Enterprise environment to create")
 	cmd.Flags().StringVar(&opts.gitToken, "git-token", viper.GetString("git-token"), "git token which will be used by argo-cd to create the gitops repository")
+	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", viper.GetBool("dry-run"), "when true, the command will have no side effects, and will only output the manifests to stdout")
 
 	cferrors.MustContext(ctx, cmd.MarkFlagRequired("repo-url"))
 	cferrors.MustContext(ctx, cmd.MarkFlagRequired("env-name"))
@@ -94,15 +99,7 @@ func uninstall(ctx context.Context, opts *options) {
 		}
 	}()
 
-	var err error
-	values.GitopsRepo, err = git.CloneExistingRepo(ctx, values.RepoOwner, values.RepoName, opts.gitToken)
-	cferrors.CheckErr(err)
-
-	values.GitopsRepoClonePath, err = values.GitopsRepo.Root()
-	cferrors.CheckErr(err)
-
-	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
-	cferrors.CheckErr(err)
+	conf := cloneExistingRepo(ctx, opts)
 
 	env, exists := conf.Environments[opts.envName]
 	if !exists {
@@ -116,14 +113,14 @@ func uninstall(ctx context.Context, opts *options) {
 
 	if rootApp != nil {
 		log.G(ctx).Printf("waiting for root application sync... (might take a few seconds)")
-		awaitSync(ctx, rootApp)
+		awaitSync(ctx, opts, rootApp)
 
 		log.G(ctx).Printf("deleting root application")
-		deleteRootResources(ctx, rootApp)
+		deleteArgocdApp(ctx, opts, rootApp)
 
 		log.G(ctx).Printf("cleaning up the repo")
 
-		cferrors.CheckErr(env.DeleteBootstrap(ctx, renderValues))
+		cferrors.CheckErr(env.DeleteBootstrap(ctx, renderValues, opts.dryRun))
 		cferrors.CheckErr(conf.DeleteEnvironmentP(opts.envName))
 
 		persistGitopsRepo(ctx, opts, fmt.Sprintf("cleanup %s resources", opts.envName))
@@ -137,25 +134,28 @@ func uninstall(ctx context.Context, opts *options) {
 	}
 }
 
-func deleteRootResources(ctx context.Context, app *envman.Application) {
-	c := newArgoCdClient(ctx)
-	deletePolicy := v1.DeletePropagationForeground
-	cferrors.CheckErr(c.ArgoprojV1alpha1().Applications(app.Namespace).Delete(ctx, app.Name, v1.DeleteOptions{
-		PropagationPolicy: &deletePolicy,
-	}))
-	cferrors.CheckErr(c.ArgoprojV1alpha1().AppProjects(app.Namespace).Delete(ctx, app.Name, v1.DeleteOptions{
-		PropagationPolicy: &deletePolicy,
-	}))
-	awaitDeletion(ctx, app)
-}
-
-func newArgoCdClient(ctx context.Context) *versioned.Clientset {
-	conf, err := store.Get().NewKubeClient(ctx).ToRESTConfig()
+func cloneExistingRepo(ctx context.Context, opts *options) *envman.Config {
+	p, err := git.NewProvider(&git.Options{
+		Type: "github", // only option for now
+		Auth: &git.Auth{
+			Password: opts.gitToken,
+		},
+	})
 	cferrors.CheckErr(err)
 
-	c, err := versioned.NewForConfig(conf)
+	values.GitopsRepo, err = p.CloneRepository(ctx, &git.GetRepositoryOptions{
+		Owner: values.RepoOwner,
+		Name:  values.RepoName,
+	})
 	cferrors.CheckErr(err)
-	return c
+
+	values.GitopsRepoClonePath, err = values.GitopsRepo.Root()
+	cferrors.CheckErr(err)
+
+	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
+	cferrors.CheckErr(err)
+
+	return conf
 }
 
 func persistGitopsRepo(ctx context.Context, opts *options, msg string) {
@@ -164,6 +164,10 @@ func persistGitopsRepo(ctx context.Context, opts *options, msg string) {
 
 	values.CommitRev, err = values.GitopsRepo.Commit(ctx, msg)
 	cferrors.CheckErr(err)
+
+	if opts.dryRun {
+		return
+	}
 
 	log.G(ctx).Printf("pushing to gitops repo...")
 	err = values.GitopsRepo.Push(ctx, &git.PushOptions{
@@ -174,8 +178,8 @@ func persistGitopsRepo(ctx context.Context, opts *options, msg string) {
 	cferrors.CheckErr(err)
 }
 
-func awaitSync(ctx context.Context, app *envman.Application) {
-	awaitAppCondition(ctx, app, func(a *v1alpha1.Application, err error) (bool, error) {
+func awaitSync(ctx context.Context, opts *options, app *envman.Application) {
+	awaitAppCondition(ctx, opts, app, func(a *v1alpha1.Application, err error) (bool, error) {
 		if err != nil {
 			return false, err
 		}
@@ -184,8 +188,28 @@ func awaitSync(ctx context.Context, app *envman.Application) {
 	})
 }
 
-func awaitDeletion(ctx context.Context, app *envman.Application) {
-	awaitAppCondition(ctx, app, func(a *v1alpha1.Application, err error) (bool, error) {
+func deleteArgocdApp(ctx context.Context, opts *options, app *envman.Application) {
+	projData, err := ioutil.ReadFile(filepath.Join(filepath.Dir(app.Path), fmt.Sprintf("%s-project.yaml", opts.envName)))
+	cferrors.CheckErr(err)
+
+	appData, err := ioutil.ReadFile(app.Path)
+	cferrors.CheckErr(err)
+
+	manifests := []byte(fmt.Sprintf("%s\n\n---\n%s", string(projData), string(appData)))
+
+	cferrors.CheckErr(delete(ctx, opts, manifests))
+	awaitDeletion(ctx, opts, app)
+}
+
+func delete(ctx context.Context, opts *options, data []byte) error {
+	return store.Get().NewKubeClient(ctx).Delete(ctx, &kube.DeleteOptions{
+		Manifests: data,
+		DryRun:    opts.dryRun,
+	})
+}
+
+func awaitDeletion(ctx context.Context, opts *options, app *envman.Application) {
+	awaitAppCondition(ctx, opts, app, func(a *v1alpha1.Application, err error) (bool, error) {
 		if err != nil {
 			if kerrors.IsGone(err) {
 				return true, nil
@@ -197,7 +221,7 @@ func awaitDeletion(ctx context.Context, app *envman.Application) {
 	})
 }
 
-func awaitAppCondition(ctx context.Context, rootApp *envman.Application, predicate func(*v1alpha1.Application, error) (bool, error)) {
+func awaitAppCondition(ctx context.Context, opts *options, rootApp *envman.Application, predicate func(*v1alpha1.Application, error) (bool, error)) {
 	o := &kube.WaitOptions{
 		Interval: time.Second * 2,
 		Timeout:  time.Minute * 2,
@@ -220,6 +244,7 @@ func awaitAppCondition(ctx context.Context, rootApp *envman.Application, predica
 				},
 			},
 		},
+		DryRun: opts.dryRun,
 	}
 
 	cferrors.CheckErr(store.Get().NewKubeClient(ctx).Wait(ctx, o))

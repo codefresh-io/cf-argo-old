@@ -52,13 +52,16 @@ type (
 		// IOStreams the std streams used by the apply command
 		Manifests []byte
 
-		// DryRunStrategy by default false, can be set to either "client" or "server" dry-run modes, see kubectl apply --help
+		// DryRunStrategy by default false, if true will be set to "client" dry-run modes, see kubectl apply --help
 		DryRun bool
 	}
 
 	DeleteOptions struct {
 		// IOStreams the std streams used by the apply command
 		Manifests []byte
+
+		// DryRunStrategy by default false, if true will be set to "client" dry-run modes, see kubectl apply --help
+		DryRun bool
 	}
 )
 

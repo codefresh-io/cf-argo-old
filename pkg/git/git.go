@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"strings"
@@ -31,7 +30,7 @@ type (
 
 		Push(context.Context, *PushOptions) error
 
-		HasRemotes() (bool, error)
+		IsNewRepo() (bool, error)
 
 		Root() (string, error)
 	}
@@ -42,11 +41,9 @@ type (
 		// clone url
 		CreateRepository(ctx context.Context, opts *CreateRepositoryOptions) (string, error)
 
-		Clone(ctx context.Context, opts *CloneOptions) (Repository, error)
-
-		// GetRepository tries to get the repository returns the clone url if exists or
+		// CloneRepository tries to clone the repository and return it if it exists or
 		// ErrRepoNotFound if the repo does not exist
-		GetRepository(ctx context.Context, opts *GetRepositoryOptions) (string, error)
+		CloneRepository(ctx context.Context, opts *GetRepositoryOptions) (Repository, error)
 	}
 
 	// Options for a new git provider
@@ -98,7 +95,7 @@ var (
 )
 
 // New creates a new git provider
-func New(opts *Options) (Provider, error) {
+func NewProvider(opts *Options) (Provider, error) {
 	switch opts.Type {
 	case "github":
 		return newGithub(opts)
@@ -135,36 +132,6 @@ func getRef(cloneURL string) string {
 	}
 
 	return u.Fragment
-}
-
-func CloneExistingRepo(ctx context.Context, repoOwner, repoName, gitToken string) (Repository, error) {
-	p, err := New(&Options{
-		Type: "github", // only option for now
-		Auth: &Auth{
-			Password: gitToken,
-		},
-	})
-	cferrors.CheckErr(err)
-
-	cloneURL, err := p.GetRepository(ctx, &GetRepositoryOptions{
-		Owner: repoOwner,
-		Name:  repoName,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	log.G(ctx).Debug("creating temp dir for gitops repo")
-	clonePath, err := ioutil.TempDir("", "repo-")
-	cferrors.CheckErr(err)
-	log.G(ctx).WithField("location", clonePath).Debug("temp dir created")
-
-	log.G(ctx).Printf("cloning existing gitops repository...")
-
-	return p.Clone(ctx, &CloneOptions{
-		URL:  cloneURL,
-		Path: clonePath,
-	})
 }
 
 func Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
@@ -306,13 +273,13 @@ func (r *repo) Push(ctx context.Context, opts *PushOptions) error {
 	return nil
 }
 
-func (r *repo) HasRemotes() (bool, error) {
+func (r *repo) IsNewRepo() (bool, error) {
 	remotes, err := r.r.Remotes()
 	if err != nil {
 		return false, err
 	}
 
-	return len(remotes) > 0, nil
+	return len(remotes) == 0, nil
 }
 
 func (r *repo) Root() (string, error) {

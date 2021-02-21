@@ -140,6 +140,10 @@ func (c *client) delete(ctx context.Context, opts *DeleteOptions) error {
 				return err
 			}
 
+			if opts.DryRun {
+				o.DryRunStrategy = kcmdutil.DryRunClient
+			}
+
 			return o.RunDelete(c)
 		},
 		SilenceErrors: true,
