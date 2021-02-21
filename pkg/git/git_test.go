@@ -19,8 +19,13 @@ func Test_NewProvider(t *testing.T) {
 			&github{},
 			"",
 		},
-		"No type": {
+		"No Type": {
 			&Options{},
+			nil,
+			ErrProviderNotSupported.Error(),
+		},
+		"Bad Type": {
+			&Options{Type: "foo"},
 			nil,
 			ErrProviderNotSupported.Error(),
 		},
