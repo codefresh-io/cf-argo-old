@@ -37,7 +37,7 @@ test:
 	go test ./... -v
 
 .PHONY: codegen
-codegen: $(GOPATH)/bin/golangci-lint
+codegen: $(GOPATH)/bin/mockery
 	go generate ./pkg/git
 
 .PHONY: pre-commit
