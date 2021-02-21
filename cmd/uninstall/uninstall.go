@@ -111,10 +111,10 @@ func uninstall(ctx context.Context, opts *options) {
 
 	persistGitopsRepo(ctx, opts, fmt.Sprintf("uninstalled environment %s", opts.envName))
 
-	if rootApp != nil {
-		log.G(ctx).Printf("waiting for root application sync... (might take a few seconds)")
-		awaitSync(ctx, opts, rootApp)
+	log.G(ctx).Printf("waiting for root application sync... (might take a few seconds)")
+	awaitSync(ctx, opts, rootApp)
 
+	if rootApp != nil {
 		log.G(ctx).Printf("deleting root application")
 		deleteArgocdApp(ctx, opts, rootApp)
 
