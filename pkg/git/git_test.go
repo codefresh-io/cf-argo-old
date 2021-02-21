@@ -33,7 +33,7 @@ func Test_NewProvider(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			p, err := New(test.opts)
+			p, err := NewProvider(test.opts)
 			if test.expectedError != "" {
 				assert.EqualError(t, err, test.expectedError)
 				return

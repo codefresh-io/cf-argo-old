@@ -14,12 +14,12 @@ type Provider struct {
 	mock.Mock
 }
 
-// Clone provides a mock function with given fields: ctx, opts
-func (_m *Provider) Clone(ctx context.Context, opts *git.CloneOptions) (git.Repository, error) {
+// CloneRepository provides a mock function with given fields: ctx, opts
+func (_m *Provider) CloneRepository(ctx context.Context, opts *git.GetRepositoryOptions) (git.Repository, error) {
 	ret := _m.Called(ctx, opts)
 
 	var r0 git.Repository
-	if rf, ok := ret.Get(0).(func(context.Context, *git.CloneOptions) git.Repository); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *git.GetRepositoryOptions) git.Repository); ok {
 		r0 = rf(ctx, opts)
 	} else {
 		if ret.Get(0) != nil {
@@ -28,7 +28,7 @@ func (_m *Provider) Clone(ctx context.Context, opts *git.CloneOptions) (git.Repo
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *git.CloneOptions) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *git.GetRepositoryOptions) error); ok {
 		r1 = rf(ctx, opts)
 	} else {
 		r1 = ret.Error(1)
@@ -50,27 +50,6 @@ func (_m *Provider) CreateRepository(ctx context.Context, opts *git.CreateReposi
 
 	var r1 error
 	if rf, ok := ret.Get(1).(func(context.Context, *git.CreateRepositoryOptions) error); ok {
-		r1 = rf(ctx, opts)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetRepository provides a mock function with given fields: ctx, opts
-func (_m *Provider) GetRepository(ctx context.Context, opts *git.GetRepositoryOptions) (string, error) {
-	ret := _m.Called(ctx, opts)
-
-	var r0 string
-	if rf, ok := ret.Get(0).(func(context.Context, *git.GetRepositoryOptions) string); ok {
-		r0 = rf(ctx, opts)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *git.GetRepositoryOptions) error); ok {
 		r1 = rf(ctx, opts)
 	} else {
 		r1 = ret.Error(1)

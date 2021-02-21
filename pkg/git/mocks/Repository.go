@@ -63,8 +63,8 @@ func (_m *Repository) Commit(ctx context.Context, msg string) (string, error) {
 	return r0, r1
 }
 
-// HasRemotes provides a mock function with given fields:
-func (_m *Repository) HasRemotes() (bool, error) {
+// IsNewRepo provides a mock function with given fields:
+func (_m *Repository) IsNewRepo() (bool, error) {
 	ret := _m.Called()
 
 	var r0 bool
@@ -96,4 +96,25 @@ func (_m *Repository) Push(_a0 context.Context, _a1 *git.PushOptions) error {
 	}
 
 	return r0
+}
+
+// Root provides a mock function with given fields:
+func (_m *Repository) Root() (string, error) {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
