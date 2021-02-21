@@ -1,3 +1,6 @@
+//go:generate mockery -name Provider
+//go:generate mockery -name Repository
+
 package git
 
 import (
