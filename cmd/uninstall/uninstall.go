@@ -51,6 +51,7 @@ func New(ctx context.Context) *cobra.Command {
 		Short: "Uninstalls an Argo Enterprise solution from a specified cluster and installation",
 		Long:  "This command will clear all Argo-CD managed resources relating to a specific installation, from a specific cluster",
 		Run: func(cmd *cobra.Command, args []string) {
+			fillValues(&opts)
 			uninstall(ctx, &opts)
 		},
 	}
@@ -72,6 +73,13 @@ func New(ctx context.Context) *cobra.Command {
 	cferrors.MustContext(ctx, cmd.MarkFlagRequired("env-name"))
 
 	return cmd
+}
+
+func fillValues(opts *options) {
+	var err error
+	cferrors.CheckErr(err)
+
+	renderValues.EnvName = opts.envName
 }
 
 func uninstall(ctx context.Context, opts *options) {

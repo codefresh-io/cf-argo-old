@@ -6,7 +6,6 @@ package git
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -100,43 +99,6 @@ func NewProvider(opts *Options) (Provider, error) {
 	default:
 		return nil, ErrProviderNotSupported
 	}
-}
-
-func SplitCloneURL(cloneURL string) (owner string, repo string, err error) {
-	u, err := url.Parse(cloneURL)
-	if err != nil {
-		return "", "", err
-	}
-
-	switch u.Scheme {
-	case "https", "http":
-		parts := strings.Split(u.Path, "/")
-		if len(parts) < 3 {
-			return "", "", fmt.Errorf("malformed repository url")
-		}
-		owner = parts[1]
-		repo = strings.Split(parts[2], ".")[0]
-	case "ssh":
-		// example: ssh://git@github.com:owner/repo.git
-		cloneURL = cloneURL[len("ssh://"):]
-		fallthrough
-	case "":
-		// example: git@github.com:owner/repo.git
-		if strings.TrimRight(cloneURL, "@") != "git" {
-			return "", "", fmt.Errorf("malformed repository url")
-		}
-		part := strings.TrimLeft(cloneURL, ":")
-		part = strings.TrimRight(part, ".")
-		parts := strings.Split(part, "/")
-		if len(parts) < 2 {
-			return "", "", fmt.Errorf("malformed repository url")
-		}
-		return parts[0], parts[1], nil
-	default:
-		return "", "", fmt.Errorf("unsupported scheme in clone url \"%s\"", u.Scheme)
-	}
-
-	return
 }
 
 func getRef(cloneURL string) string {
