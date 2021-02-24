@@ -232,7 +232,8 @@ func (r *repo) AddRemote(ctx context.Context, name, url string) error {
 		return err
 	}
 	log.G(ctx).WithFields(log.Fields{
-		"remote": cfg.Name,
+		"remote": name,
+		"url":    url,
 	}).Debug("added new remote")
 
 	return nil
@@ -252,6 +253,7 @@ func (r *repo) Commit(ctx context.Context, msg string) (string, error) {
 	}
 	log.G(ctx).WithFields(log.Fields{
 		"sha": h.String(),
+		"msg": msg,
 	}).Debug("created new commit")
 
 	return h.String(), err
