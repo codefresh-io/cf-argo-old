@@ -2,7 +2,6 @@ package uninstall
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -32,18 +31,16 @@ type options struct {
 }
 
 var values struct {
-	ArgoAppsDir         string
-	RepoUrl             string
 	GitopsRepoClonePath string
 	GitopsRepo          git.Repository
 	CommitRev           string
 }
 
 var renderValues struct {
-	EnvName   string
-	RepoOwner string
-	RepoName  string
-	GitToken  string
+	EnvName      string
+	RepoURL      string
+	RepoOwnerURL string
+	GitToken     string
 }
 
 func New(ctx context.Context) *cobra.Command {
@@ -54,7 +51,6 @@ func New(ctx context.Context) *cobra.Command {
 		Short: "Uninstalls an Argo Enterprise solution from a specified cluster and installation",
 		Long:  "This command will clear all Argo-CD managed resources relating to a specific installation, from a specific cluster",
 		Run: func(cmd *cobra.Command, args []string) {
-			fillValues(&opts)
 			uninstall(ctx, &opts)
 		},
 	}
@@ -76,16 +72,6 @@ func New(ctx context.Context) *cobra.Command {
 	cferrors.MustContext(ctx, cmd.MarkFlagRequired("env-name"))
 
 	return cmd
-}
-
-// fill the values used to render the templates
-func fillValues(opts *options) {
-	var err error
-	cferrors.CheckErr(err)
-
-	renderValues.EnvName = opts.envName
-	renderValues.RepoUrl = opts.repoURL
-	renderValues.GitToken = base64.StdEncoding.EncodeToString([]byte(opts.gitToken))
 }
 
 func uninstall(ctx context.Context, opts *options) {

@@ -160,12 +160,12 @@ func (c *Config) installEnv(env *Environment) (*Environment, error) {
 	src := filepath.Join(env.c.path, filepath.Dir(env.RootApplicationPath))
 	var dstApplicationPath string
 	if len(c.Environments) == 0 {
-		dstApplicationPath = filepath.Dir(newEnv.RootApplicationPath)
+		dstApplicationPath = newEnv.RootApplicationPath
 	} else {
 		dstApplicationPath = c.FirstEnv().RootApplicationPath
 	}
 
-	dst := filepath.Join(c.path, dstApplicationPath)
+	dst := filepath.Join(c.path, filepath.Dir(dstApplicationPath))
 	err = helpers.CopyDir(src, dst)
 	if err != nil {
 		return nil, err

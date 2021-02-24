@@ -44,10 +44,10 @@ var values struct {
 }
 
 var renderValues struct {
-	EnvName    string
-	RepoURL    string
-	RepoOrgURL string
-	GitToken   string
+	EnvName      string
+	RepoURL      string
+	RepoOwnerURL string
+	GitToken     string
 }
 
 func New(ctx context.Context) *cobra.Command {
@@ -112,7 +112,13 @@ func fillValues(opts *options) {
 	values.Namespace = fmt.Sprintf("%s-argocd", opts.envName)
 
 	renderValues.EnvName = opts.envName
-	renderValues.RepoURL = opts.repoURL
+	if opts.repoURL != "" {
+		renderValues.RepoURL = opts.repoURL
+	} else {
+		renderValues.RepoURL = fmt.Sprintf("https://github.com/%s/%s", opts.repoOwner, opts.repoName)
+	}
+
+	renderValues.RepoOwnerURL = renderValues.RepoURL[:strings.LastIndex(renderValues.RepoURL, "/")]
 	renderValues.GitToken = base64.StdEncoding.EncodeToString([]byte(opts.gitToken))
 }
 
@@ -127,10 +133,10 @@ func install(ctx context.Context, opts *options) {
 	log.G(ctx).Printf("cloning template repository...")
 	prepareBase(ctx, opts)
 
-	if opts.cloneURL {
-		addToExistingGitopsRepo(ctx, opts)
-	} else {
+	if opts.repoURL == "" {
 		initializeNewGitopsRepo(ctx, opts)
+	} else {
+		addToExistingGitopsRepo(ctx, opts)
 	}
 
 	log.G(ctx).Printf("waiting for argocd initialization to complete... (might take a few seconds)")
@@ -169,6 +175,27 @@ func prepareBase(ctx context.Context, opts *options) {
 	cferrors.CheckErr(helpers.RenderDirRecurse(filepath.Join(values.TemplateRepoClonePath, "**/*.*"), renderValues))
 }
 
+func addToExistingGitopsRepo(ctx context.Context, opts *options) {
+	values.GitopsRepo, values.GitopsRepoClonePath = cloneExistingRepo(ctx, opts)
+
+	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
+	cferrors.CheckErr(err)
+
+	if _, exists := conf.Environments[opts.envName]; exists {
+		panic(fmt.Errorf("environment with name \"%s\" already exists in target repository", opts.envName))
+	}
+
+	tplConf, err := envman.LoadConfig(values.TemplateRepoClonePath)
+	cferrors.CheckErr(err)
+
+	newEnv := tplConf.FirstEnv()
+	newEnv.UpdateTemplateRef(opts.baseRepo)
+	cferrors.CheckErr(conf.AddEnvironmentP(newEnv))
+
+	log.G(ctx).Printf("installing bootstrap resources...")
+	cferrors.CheckErr(newEnv.ApplyBootstrap(ctx, renderValues, opts.dryRun))
+}
+
 func cloneExistingRepo(ctx context.Context, opts *options) (git.Repository, string) {
 	p, err := git.NewProvider(&git.Options{
 		Type: "github", // only option for now
@@ -178,13 +205,31 @@ func cloneExistingRepo(ctx context.Context, opts *options) (git.Repository, stri
 	})
 	cferrors.CheckErr(err)
 
-	r, err = p.CloneRepository(ctx, opts.repoURL)
+	r, err := p.CloneRepository(ctx, opts.repoURL)
 	cferrors.CheckErr(err)
 
 	clonePath, err := r.Root()
 	cferrors.CheckErr(err)
 
 	return r, clonePath
+}
+
+func initializeNewGitopsRepo(ctx context.Context, opts *options) {
+	var err error
+	// use the template repo to init the new repo
+	values.GitopsRepoClonePath = values.TemplateRepoClonePath
+	values.GitopsRepo, err = git.Init(ctx, values.GitopsRepoClonePath)
+	cferrors.CheckErr(err)
+
+	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
+	cferrors.CheckErr(err)
+
+	env := conf.FirstEnv()
+	env.UpdateTemplateRef(opts.baseRepo)
+	cferrors.CheckErr(conf.Persist())
+
+	log.G(ctx).Printf("installing bootstrap resources...")
+	cferrors.CheckErr(env.ApplyBootstrap(ctx, renderValues, opts.dryRun))
 }
 
 func waitForDeployments(ctx context.Context, opts *options) {
@@ -284,7 +329,21 @@ func createSealedSecret(ctx context.Context, opts *options) {
 	))
 }
 
+func apply(ctx context.Context, opts *options, data []byte) error {
+	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
+		Manifests: data,
+		DryRun:    opts.dryRun,
+	})
+}
+
 func persistGitopsRepo(ctx context.Context, opts *options) {
+	cferrors.CheckErr(os.RemoveAll(filepath.Join(values.TemplateRepoClonePath, values.BootstrapDir)))
+
+	cferrors.CheckErr(values.GitopsRepo.Add(ctx, "."))
+
+	_, err := values.GitopsRepo.Commit(ctx, fmt.Sprintf("added environment %s", opts.envName))
+	cferrors.CheckErr(err)
+
 	if opts.dryRun {
 		return
 	}
@@ -293,19 +352,12 @@ func persistGitopsRepo(ctx context.Context, opts *options) {
 	cferrors.CheckErr(err)
 
 	if isNewRepo {
-		log.G(ctx).Printf("creating gitops repository: %s/%s...", values.RepoOwner, values.RepoName)
+		log.G(ctx).Printf("creating gitops repository: %s/%s...", opts.repoOwner, opts.repoName)
 		cloneURL, err := createRemoteRepo(ctx, opts)
 		cferrors.CheckErr(err)
 
 		cferrors.CheckErr(values.GitopsRepo.AddRemote(ctx, "origin", cloneURL))
 	}
-
-	cferrors.CheckErr(os.RemoveAll(filepath.Join(values.TemplateRepoClonePath, values.BootstrapDir)))
-
-	cferrors.CheckErr(values.GitopsRepo.Add(ctx, "."))
-
-	_, err = values.GitopsRepo.Commit(ctx, fmt.Sprintf("added environment %s", opts.envName))
-	cferrors.CheckErr(err)
 
 	log.G(ctx).Printf("pushing to gitops repo...")
 	err = values.GitopsRepo.Push(ctx, &git.PushOptions{
@@ -314,52 +366,6 @@ func persistGitopsRepo(ctx context.Context, opts *options) {
 		},
 	})
 	cferrors.CheckErr(err)
-}
-
-func initializeNewGitopsRepo(ctx context.Context, opts *options) {
-	var err error
-	// use the template repo to init the new repo
-	values.GitopsRepoClonePath = values.TemplateRepoClonePath
-	values.GitopsRepo, err = git.Init(ctx, values.GitopsRepoClonePath)
-	cferrors.CheckErr(err)
-
-	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
-	cferrors.CheckErr(err)
-
-	env := conf.FirstEnv()
-	env.UpdateTemplateRef(opts.baseRepo)
-	cferrors.CheckErr(conf.Persist())
-
-	log.G(ctx).Printf("installing bootstrap resources...")
-	cferrors.CheckErr(env.ApplyBootstrap(ctx, renderValues, opts.dryRun))
-}
-
-func addToExistingGitopsRepo(ctx context.Context, opts *options) {
-	values.GitopsRepo, values.GitopsRepoClonePath = cloneExistingRepo(ctx, opts)
-
-	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
-	cferrors.CheckErr(err)
-
-	if _, exists := conf.Environments[opts.envName]; exists {
-		panic(fmt.Errorf("environment with name \"%s\" already exists in target repository", opts.envName))
-	}
-
-	tplConf, err := envman.LoadConfig(values.TemplateRepoClonePath)
-	cferrors.CheckErr(err)
-
-	newEnv := tplConf.FirstEnv()
-	newEnv.UpdateTemplateRef(opts.baseRepo)
-	cferrors.CheckErr(conf.AddEnvironmentP(newEnv))
-
-	log.G(ctx).Printf("installing bootstrap resources...")
-	cferrors.CheckErr(newEnv.ApplyBootstrap(ctx, renderValues, opts.dryRun))
-}
-
-func apply(ctx context.Context, opts *options, data []byte) error {
-	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
-		Manifests: data,
-		DryRun:    opts.dryRun,
-	})
 }
 
 func createRemoteRepo(ctx context.Context, opts *options) (string, error) {
@@ -374,8 +380,8 @@ func createRemoteRepo(ctx context.Context, opts *options) (string, error) {
 	}
 
 	cloneURL, err := p.CreateRepository(ctx, &git.CreateRepositoryOptions{
-		Owner:   values.RepoOwner,
-		Name:    values.RepoName,
+		Owner:   opts.repoOwner,
+		Name:    opts.repoName,
 		Private: true,
 	})
 	if err != nil {
