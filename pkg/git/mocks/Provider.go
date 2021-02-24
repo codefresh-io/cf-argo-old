@@ -14,13 +14,13 @@ type Provider struct {
 	mock.Mock
 }
 
-// CloneRepository provides a mock function with given fields: ctx, opts
-func (_m *Provider) CloneRepository(ctx context.Context, opts *git.GetRepositoryOptions) (git.Repository, error) {
-	ret := _m.Called(ctx, opts)
+// CloneRepository provides a mock function with given fields: ctx, cloneURL
+func (_m *Provider) CloneRepository(ctx context.Context, cloneURL string) (git.Repository, error) {
+	ret := _m.Called(ctx, cloneURL)
 
 	var r0 git.Repository
-	if rf, ok := ret.Get(0).(func(context.Context, *git.GetRepositoryOptions) git.Repository); ok {
-		r0 = rf(ctx, opts)
+	if rf, ok := ret.Get(0).(func(context.Context, string) git.Repository); ok {
+		r0 = rf(ctx, cloneURL)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(git.Repository)
@@ -28,8 +28,8 @@ func (_m *Provider) CloneRepository(ctx context.Context, opts *git.GetRepository
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *git.GetRepositoryOptions) error); ok {
-		r1 = rf(ctx, opts)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, cloneURL)
 	} else {
 		r1 = ret.Error(1)
 	}
