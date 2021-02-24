@@ -26,28 +26,28 @@ import (
 )
 
 type options struct {
-	repoURL  string
-	envName  string
-	gitToken string
-	baseRepo string
-	dryRun   bool
+	repoURL   string
+	repoOwner string
+	repoName  string
+	envName   string
+	gitToken  string
+	baseRepo  string
+	dryRun    bool
 }
 
 var values struct {
 	BootstrapDir          string
 	Namespace             string
-	RepoOwner             string
-	RepoName              string
 	TemplateRepoClonePath string
 	GitopsRepoClonePath   string
 	GitopsRepo            git.Repository
 }
 
 var renderValues struct {
-	EnvName   string
-	RepoOwner string
-	RepoName  string
-	GitToken  string
+	EnvName    string
+	RepoURL    string
+	RepoOrgURL string
+	GitToken   string
 }
 
 func New(ctx context.Context) *cobra.Command {
@@ -58,6 +58,7 @@ func New(ctx context.Context) *cobra.Command {
 		Short: "Installs the Argo Enterprise solution on a specified cluster",
 		Long:  "This command will create a new git repository that manages an Argo Enterprise solution using Argo-CD with gitops.",
 		Run: func(cmd *cobra.Command, args []string) {
+			validateOpts(&opts)
 			fillValues(&opts)
 			install(ctx, &opts)
 		},
@@ -67,6 +68,8 @@ func New(ctx context.Context) *cobra.Command {
 	store.Get().KubeConfig.AddFlagSet(cmd)
 
 	_ = viper.BindEnv("repo-url", "REPO_URL")
+	_ = viper.BindEnv("repo-owner", "REPO_OWNER")
+	_ = viper.BindEnv("repo-name", "REPO_NAME")
 	_ = viper.BindEnv("env-name", "ENV_NAME")
 	_ = viper.BindEnv("git-token", "GIT_TOKEN")
 	_ = viper.BindEnv("base-repo", "BASE_REPO")
@@ -74,31 +77,42 @@ func New(ctx context.Context) *cobra.Command {
 	viper.SetDefault("base-repo", store.Get().BaseGitURL)
 	viper.SetDefault("dry-run", false)
 
-	cmd.Flags().StringVar(&opts.repoURL, "repo-url", viper.GetString("repo-url"), "the gitops repository url. If it does not exist we will try to create it for you [REPO_URL]")
+	cmd.Flags().StringVar(&opts.repoURL, "repo-url", viper.GetString("repo-url"), "the clone url of an existing gitops repository url [REPO_URL]")
+	cmd.Flags().StringVar(&opts.repoOwner, "repo-owner", viper.GetString("repo-owner"), "the name of the owner of the gitops repository to be created")
+	cmd.Flags().StringVar(&opts.repoName, "repo-name", viper.GetString("repo-name"), "the name of the gitops repository to be created")
 	cmd.Flags().StringVar(&opts.envName, "env-name", viper.GetString("env-name"), "name of the Argo Enterprise environment to create")
 	cmd.Flags().StringVar(&opts.gitToken, "git-token", viper.GetString("git-token"), "git token which will be used by argo-cd to create the gitops repository")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", viper.GetBool("dry-run"), "when true, the command will have no side effects, and will only output the manifests to stdout")
 	cmd.Flags().StringVar(&opts.baseRepo, "base-repo", viper.GetString("base-repo"), "the template repository url")
 
-	cferrors.MustContext(ctx, cmd.MarkFlagRequired("repo-url"))
 	cferrors.MustContext(ctx, cmd.MarkFlagRequired("git-token"))
 	cferrors.MustContext(ctx, cmd.Flags().MarkHidden("base-repo"))
 
 	return cmd
 }
 
+func validateOpts(opts *options) {
+	if opts.repoURL != "" && opts.repoOwner != "" {
+		panic("--repo-url and --repo-owner are mutually exclusive")
+	}
+	if opts.repoURL != "" && opts.repoName != "" {
+		panic("--repo-url and --repo-name are mutually exclusive")
+	}
+	if opts.repoURL == "" && (opts.repoOwner == "" || opts.repoName == "") {
+		panic("must provide --repo-url or --repo-owner and --repo-name")
+	}
+}
+
 // fill the values used to render the templates
 func fillValues(opts *options) {
 	var err error
-	values.RepoOwner, values.RepoName, err = git.SplitCloneURL(opts.repoURL)
 	cferrors.CheckErr(err)
 
 	values.BootstrapDir = "bootstrap"
 	values.Namespace = fmt.Sprintf("%s-argocd", opts.envName)
 
 	renderValues.EnvName = opts.envName
-	renderValues.RepoOwner = values.RepoOwner
-	renderValues.RepoName = values.RepoName
+	renderValues.RepoURL = opts.repoURL
 	renderValues.GitToken = base64.StdEncoding.EncodeToString([]byte(opts.gitToken))
 }
 
@@ -111,14 +125,12 @@ func install(ctx context.Context, opts *options) {
 	}()
 
 	log.G(ctx).Printf("cloning template repository...")
-	conf := tryCloneExistingRepo(ctx, opts)
-
 	prepareBase(ctx, opts)
 
-	if conf == nil {
-		initializeNewGitopsRepo(ctx, opts)
+	if opts.cloneURL {
+		addToExistingGitopsRepo(ctx, opts)
 	} else {
-		addToExistingGitopsRepo(ctx, conf, opts)
+		initializeNewGitopsRepo(ctx, opts)
 	}
 
 	log.G(ctx).Printf("waiting for argocd initialization to complete... (might take a few seconds)")
@@ -157,7 +169,7 @@ func prepareBase(ctx context.Context, opts *options) {
 	cferrors.CheckErr(helpers.RenderDirRecurse(filepath.Join(values.TemplateRepoClonePath, "**/*.*"), renderValues))
 }
 
-func tryCloneExistingRepo(ctx context.Context, opts *options) *envman.Config {
+func cloneExistingRepo(ctx context.Context, opts *options) (git.Repository, string) {
 	p, err := git.NewProvider(&git.Options{
 		Type: "github", // only option for now
 		Auth: &git.Auth{
@@ -166,30 +178,13 @@ func tryCloneExistingRepo(ctx context.Context, opts *options) *envman.Config {
 	})
 	cferrors.CheckErr(err)
 
-	values.GitopsRepo, err = p.CloneRepository(ctx, &git.GetRepositoryOptions{
-		Owner: values.RepoOwner,
-		Name:  values.RepoName,
-	})
-
-	if err != nil {
-		if err != git.ErrRepoNotFound {
-			cferrors.CheckErr(err)
-		}
-
-		return nil // we will create it later
-	}
-
-	values.GitopsRepoClonePath, err = values.GitopsRepo.Root()
+	r, err = p.CloneRepository(ctx, opts.repoURL)
 	cferrors.CheckErr(err)
 
-	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
+	clonePath, err := r.Root()
 	cferrors.CheckErr(err)
 
-	if _, exists := conf.Environments[opts.envName]; exists {
-		panic(fmt.Errorf("environment with name \"%s\" already exists in target repository", opts.envName))
-	}
-
-	return conf
+	return r, clonePath
 }
 
 func waitForDeployments(ctx context.Context, opts *options) {
@@ -339,7 +334,16 @@ func initializeNewGitopsRepo(ctx context.Context, opts *options) {
 	cferrors.CheckErr(env.ApplyBootstrap(ctx, renderValues, opts.dryRun))
 }
 
-func addToExistingGitopsRepo(ctx context.Context, conf *envman.Config, opts *options) {
+func addToExistingGitopsRepo(ctx context.Context, opts *options) {
+	values.GitopsRepo, values.GitopsRepoClonePath = cloneExistingRepo(ctx, opts)
+
+	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
+	cferrors.CheckErr(err)
+
+	if _, exists := conf.Environments[opts.envName]; exists {
+		panic(fmt.Errorf("environment with name \"%s\" already exists in target repository", opts.envName))
+	}
+
 	tplConf, err := envman.LoadConfig(values.TemplateRepoClonePath)
 	cferrors.CheckErr(err)
 

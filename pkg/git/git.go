@@ -46,7 +46,7 @@ type (
 
 		// CloneRepository tries to clone the repository and return it if it exists or
 		// ErrRepoNotFound if the repo does not exist
-		CloneRepository(ctx context.Context, opts *GetRepositoryOptions) (Repository, error)
+		CloneRepository(ctx context.Context, cloneURL string) (Repository, error)
 	}
 
 	// Options for a new git provider
@@ -81,11 +81,6 @@ type (
 		Private bool
 	}
 
-	GetRepositoryOptions struct {
-		Owner string
-		Name  string
-	}
-
 	repo struct {
 		r *gg.Repository
 	}
@@ -114,13 +109,29 @@ func SplitCloneURL(cloneURL string) (owner string, repo string, err error) {
 	}
 
 	switch u.Scheme {
-	case "https", "http", "ssh":
+	case "https", "http":
 		parts := strings.Split(u.Path, "/")
 		if len(parts) < 3 {
 			return "", "", fmt.Errorf("malformed repository url")
 		}
 		owner = parts[1]
-		repo = parts[2]
+		repo = strings.Split(parts[2], ".")[0]
+	case "ssh":
+		// example: ssh://git@github.com:owner/repo.git
+		cloneURL = cloneURL[len("ssh://"):]
+		fallthrough
+	case "":
+		// example: git@github.com:owner/repo.git
+		if strings.TrimRight(cloneURL, "@") != "git" {
+			return "", "", fmt.Errorf("malformed repository url")
+		}
+		part := strings.TrimLeft(cloneURL, ":")
+		part = strings.TrimRight(part, ".")
+		parts := strings.Split(part, "/")
+		if len(parts) < 2 {
+			return "", "", fmt.Errorf("malformed repository url")
+		}
+		return parts[0], parts[1], nil
 	default:
 		return "", "", fmt.Errorf("unsupported scheme in clone url \"%s\"", u.Scheme)
 	}

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-func generateMockRepo() *mockGit.Repository {
+func newMockRepo() *mockGit.Repository {
 	mockRepo := new(mockGit.Repository)
 	mockRepo.On("Add", mock.AnythingOfType("*context.valueCtx"), mock.AnythingOfType("string")).Return(nil)
 	mockRepo.On("Commit", mock.AnythingOfType("*context.valueCtx"), mock.AnythingOfType("string")).Return("hash", nil)
@@ -18,20 +18,21 @@ func generateMockRepo() *mockGit.Repository {
 	return mockRepo
 }
 
-func generateContext() context.Context {
+func newCtxWithLogger() context.Context {
 	return log.WithLogger(context.Background(), log.NopLogger{})
 }
 
 func Test_persistGitopsRepo(t *testing.T) {
-	mockRepo := generateMockRepo()
+	ctx := newCtxWithLogger()
+	mockRepo := newMockRepo()
 	values.GitopsRepo = mockRepo
 
-	ctx := generateContext()
-
 	msg, gitToken := "some message", "some token"
+
 	persistGitopsRepo(ctx, &options{
 		gitToken: gitToken,
 	}, msg)
+
 	mockRepo.AssertCalled(t, "Add", ctx, ".")
 	mockRepo.AssertCalled(t, "Commit", ctx, msg)
 	mockRepo.AssertCalled(t, "Push", ctx, &git.PushOptions{
@@ -42,17 +43,16 @@ func Test_persistGitopsRepo(t *testing.T) {
 }
 
 func Test_persistGitopsRepo_dryRun(t *testing.T) {
-	mockRepo := generateMockRepo()
+	ctx := newCtxWithLogger()
+	mockRepo := newMockRepo()
 	values.GitopsRepo = mockRepo
-
-	ctx := generateContext()
-
 	msg := "some message"
+
 	persistGitopsRepo(ctx, &options{
 		dryRun: true,
 	}, msg)
+
 	mockRepo.AssertCalled(t, "Add", ctx, ".")
 	mockRepo.AssertCalled(t, "Commit", ctx, msg)
 	mockRepo.AssertNotCalled(t, "Push")
 }
-

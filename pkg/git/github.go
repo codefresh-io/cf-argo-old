@@ -81,12 +81,7 @@ func (g *github) CreateRepository(ctx context.Context, opts *CreateRepositoryOpt
 	return *r.CloneURL, err
 }
 
-func (g *github) CloneRepository(ctx context.Context, opts *GetRepositoryOptions) (Repository, error) {
-	cloneURL, err := g.getRepository(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-
+func (g *github) CloneRepository(ctx context.Context, cloneURL string) (Repository, error) {
 	log.G(ctx).Debug("creating temp dir for gitops repo")
 	clonePath, err := ioutil.TempDir("", "repo-")
 	cferrors.CheckErr(err)

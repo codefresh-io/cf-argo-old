@@ -33,8 +33,7 @@ type options struct {
 
 var values struct {
 	ArgoAppsDir         string
-	RepoName            string
-	RepoOwner           string
+	RepoUrl             string
 	GitopsRepoClonePath string
 	GitopsRepo          git.Repository
 	CommitRev           string
@@ -82,12 +81,10 @@ func New(ctx context.Context) *cobra.Command {
 // fill the values used to render the templates
 func fillValues(opts *options) {
 	var err error
-	values.RepoOwner, values.RepoName, err = git.SplitCloneURL(opts.repoURL)
 	cferrors.CheckErr(err)
 
 	renderValues.EnvName = opts.envName
-	renderValues.RepoOwner = values.RepoOwner
-	renderValues.RepoName = values.RepoName
+	renderValues.RepoUrl = opts.repoURL
 	renderValues.GitToken = base64.StdEncoding.EncodeToString([]byte(opts.gitToken))
 }
 
@@ -99,7 +96,10 @@ func uninstall(ctx context.Context, opts *options) {
 		}
 	}()
 
-	conf := cloneExistingRepo(ctx, opts)
+	values.GitopsRepo, values.GitopsRepoClonePath = cloneExistingRepo(ctx, opts)
+
+	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
+	cferrors.CheckErr(err)
 
 	env, exists := conf.Environments[opts.envName]
 	if !exists {
@@ -134,7 +134,7 @@ func uninstall(ctx context.Context, opts *options) {
 	}
 }
 
-func cloneExistingRepo(ctx context.Context, opts *options) *envman.Config {
+func cloneExistingRepo(ctx context.Context, opts *options) (git.Repository, string) {
 	p, err := git.NewProvider(&git.Options{
 		Type: "github", // only option for now
 		Auth: &git.Auth{
@@ -143,19 +143,13 @@ func cloneExistingRepo(ctx context.Context, opts *options) *envman.Config {
 	})
 	cferrors.CheckErr(err)
 
-	values.GitopsRepo, err = p.CloneRepository(ctx, &git.GetRepositoryOptions{
-		Owner: values.RepoOwner,
-		Name:  values.RepoName,
-	})
+	r, err := p.CloneRepository(ctx, opts.repoURL)
 	cferrors.CheckErr(err)
 
-	values.GitopsRepoClonePath, err = values.GitopsRepo.Root()
+	clonePath, err := r.Root()
 	cferrors.CheckErr(err)
 
-	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
-	cferrors.CheckErr(err)
-
-	return conf
+	return r, clonePath
 }
 
 func persistGitopsRepo(ctx context.Context, opts *options, msg string) {
