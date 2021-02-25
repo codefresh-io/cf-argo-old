@@ -16,6 +16,7 @@ import (
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	"github.com/ghodss/yaml"
 	v1 "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kustomize "sigs.k8s.io/kustomize/api/types"
@@ -103,7 +104,9 @@ func (c *Config) AddEnvironmentP(ctx context.Context, env *Environment, values i
 		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-argocd", env.name)},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		return err
+		if !kerrors.IsAlreadyExists(err) {
+			return err
+		}
 	}
 
 	manifests, err := kube.KustBuild(newEnv.bootstrapUrl(), values)
@@ -234,10 +237,20 @@ func (e *Environment) UpdateTemplateRef(templateRef string) {
 }
 
 func (e *Environment) bootstrapUrl() string {
-	parts := strings.Split(e.TemplateRef, "#")
+	var parts []string
+
+	switch {
+	case strings.Contains(e.TemplateRef, "#"):
+		parts = strings.Split(e.TemplateRef, "#")
+	case strings.Contains(e.TemplateRef, "@"):
+		parts = strings.Split(e.TemplateRef, "@")
+	default:
+		parts = []string{e.TemplateRef}
+	}
+
 	bootstrapUrl := fmt.Sprintf("%s/bootstrap", parts[0])
 	if len(parts) > 1 {
-		bootstrapUrl = fmt.Sprintf("%s?ref=%s", bootstrapUrl, parts[1])
+		return fmt.Sprintf("%s?ref=%s", bootstrapUrl, parts[1])
 	}
 
 	return bootstrapUrl
