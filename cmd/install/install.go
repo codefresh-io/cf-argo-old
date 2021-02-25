@@ -78,15 +78,15 @@ func New(ctx context.Context) *cobra.Command {
 	viper.SetDefault("dry-run", false)
 
 	cmd.Flags().StringVar(&opts.repoURL, "repo-url", viper.GetString("repo-url"), "the clone url of an existing gitops repository url [REPO_URL]")
-	cmd.Flags().StringVar(&opts.repoOwner, "repo-owner", viper.GetString("repo-owner"), "the name of the owner of the gitops repository to be created")
-	cmd.Flags().StringVar(&opts.repoName, "repo-name", viper.GetString("repo-name"), "the name of the gitops repository to be created")
-	cmd.Flags().StringVar(&opts.envName, "env-name", viper.GetString("env-name"), "name of the Argo Enterprise environment to create")
-	cmd.Flags().StringVar(&opts.gitToken, "git-token", viper.GetString("git-token"), "git token which will be used by argo-cd to create the gitops repository")
+	cmd.Flags().StringVar(&opts.repoOwner, "repo-owner", viper.GetString("repo-owner"), "the name of the owner of the gitops repository to be created [REPO_OWNER]")
+	cmd.Flags().StringVar(&opts.repoName, "repo-name", viper.GetString("repo-name"), "the name of the gitops repository to be created [REPO_NAME]")
+	cmd.Flags().StringVar(&opts.envName, "env-name", viper.GetString("env-name"), "name of the Argo Enterprise environment to create [ENV_NAME")
+	cmd.Flags().StringVar(&opts.gitToken, "git-token", viper.GetString("git-token"), "git token which will be used by argo-cd to create the gitops repository [GIT_TOKEN]")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", viper.GetBool("dry-run"), "when true, the command will have no side effects, and will only output the manifests to stdout")
-	cmd.Flags().StringVar(&opts.baseRepo, "base-repo", viper.GetString("base-repo"), "the template repository url")
+	cmd.Flags().StringVar(&opts.baseRepo, "base-repo", viper.GetString("base-repo"), "the template repository url [BASE_REPO]")
 
 	cferrors.MustContext(ctx, cmd.MarkFlagRequired("git-token"))
-	cferrors.MustContext(ctx, cmd.Flags().MarkHidden("base-repo"))
+	cferrors.MustContext(ctx, cmd.Flags().MarkHidden("base-repo")) // hidden, for now
 
 	return cmd
 }

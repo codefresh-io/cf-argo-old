@@ -1,12 +1,11 @@
 package uninstall
 
 import (
-	"context"
 	"testing"
 
 	"github.com/codefresh-io/cf-argo/pkg/git"
 	mockGit "github.com/codefresh-io/cf-argo/pkg/git/mocks"
-	"github.com/codefresh-io/cf-argo/pkg/log"
+	"github.com/codefresh-io/cf-argo/test/utils"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -18,12 +17,8 @@ func newMockRepo() *mockGit.Repository {
 	return mockRepo
 }
 
-func newCtxWithLogger() context.Context {
-	return log.WithLogger(context.Background(), log.NopLogger{})
-}
-
 func Test_persistGitopsRepo(t *testing.T) {
-	ctx := newCtxWithLogger()
+	ctx := utils.MockLoggerContext()
 	mockRepo := newMockRepo()
 	values.GitopsRepo = mockRepo
 
@@ -43,7 +38,7 @@ func Test_persistGitopsRepo(t *testing.T) {
 }
 
 func Test_persistGitopsRepo_dryRun(t *testing.T) {
-	ctx := newCtxWithLogger()
+	ctx := utils.MockLoggerContext()
 	mockRepo := newMockRepo()
 	values.GitopsRepo = mockRepo
 	msg := "some message"

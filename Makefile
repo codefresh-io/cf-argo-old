@@ -34,7 +34,7 @@ lint: $(GOPATH)/bin/golangci-lint
 
 .PHONY: test
 test:
-	go test ./... -v -cover
+	./hack/test.sh
 
 .PHONY: codegen
 codegen: $(GOPATH)/bin/mockery

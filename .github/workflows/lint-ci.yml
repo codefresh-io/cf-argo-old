@@ -30,4 +30,12 @@ jobs:
       run: make lint
       env:
         GOPATH: /home/runner/work/go
+    
+    - name: Test
+      run: make test
+      env:
+        GOPATH: /home/runner/work/go
+    - run:
+        name: Upload coverage to Codecov
+        command: bash <(curl -s https://codecov.io/bash) -t $CODECOV_TOKEN
 

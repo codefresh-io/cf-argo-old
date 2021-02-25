@@ -15,6 +15,8 @@ import (
 	"github.com/codefresh-io/cf-argo/pkg/kube"
 	"github.com/codefresh-io/cf-argo/pkg/store"
 	"github.com/ghodss/yaml"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kustomize "sigs.k8s.io/kustomize/api/types"
 )
@@ -92,18 +94,22 @@ func (c *Config) AddEnvironmentP(ctx context.Context, env *Environment, values i
 		return err
 	}
 
-	nsPath := filepath.Join(env.c.path, "bootstrap", "namespace.yaml")
-	nsData, err := os.ReadFile(nsPath)
+	cs, err := store.Get().NewKubeClient(ctx).KubernetesClientSet()
 	if err != nil {
 		return err
 	}
 
-	kustData, err := kube.KustBuild(newEnv.bootstrapUrl(), values)
+	_, err = cs.CoreV1().Namespaces().Create(ctx, &v1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-argocd", env.name)},
+	}, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
 
-	manifests := []byte(fmt.Sprintf("%s\n\n---\n%s", string(nsData), string(kustData)))
+	manifests, err := kube.KustBuild(newEnv.bootstrapUrl(), values)
+	if err != nil {
+		return err
+	}
 
 	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
 		Manifests: manifests,
@@ -284,7 +290,7 @@ func (e *Environment) installNewApp(srcRootPath string, app *Application) error 
 	return helpers.CopyDir(absSrc, absDst)
 }
 
-// Uninstall removed all managed apps and returns true if there are no more
+// Uninstall removes all managed apps and returns true if there are no more
 // apps left in the environment.
 func (e *Environment) Uninstall() (bool, error) {
 	rootApp, err := e.GetRootApp()

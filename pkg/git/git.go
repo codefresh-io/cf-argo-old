@@ -98,6 +98,12 @@ var (
 	ErrRepoNotFound         = errors.New("git repository not found")
 )
 
+// go-git functions (we mock those in tests)
+var (
+	plainClone = gg.PlainCloneContext
+	plainInit  = gg.PlainInit
+)
+
 // New creates a new git provider
 func NewProvider(opts *Options) (Provider, error) {
 	switch opts.Type {
@@ -150,7 +156,7 @@ func Clone(ctx context.Context, opts *CloneOptions) (Repository, error) {
 		return nil, err
 	}
 
-	r, err := gg.PlainCloneContext(ctx, opts.Path, false, cloneOpts)
+	r, err := plainClone(ctx, opts.Path, false, cloneOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +174,7 @@ func Init(ctx context.Context, path string) (Repository, error) {
 	})
 
 	l.Debug("initiallizing local repository")
-	r, err := gg.PlainInit(path, false)
+	r, err := plainInit(path, false)
 	if err != nil {
 		return nil, err
 	}

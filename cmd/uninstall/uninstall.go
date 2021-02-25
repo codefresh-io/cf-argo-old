@@ -90,7 +90,7 @@ func uninstall(ctx context.Context, opts *options) {
 		}
 	}()
 
-	values.GitopsRepo, values.GitopsRepoClonePath = cloneExistingRepo(ctx, opts)
+	cloneExistingRepo(ctx, opts)
 
 	conf, err := envman.LoadConfig(values.GitopsRepoClonePath)
 	cferrors.CheckErr(err)
@@ -120,13 +120,13 @@ func uninstall(ctx context.Context, opts *options) {
 
 		persistGitopsRepo(ctx, opts, fmt.Sprintf("cleanup %s resources", opts.envName))
 
-		log.G(ctx).Printf("all Codefresh resources in '%s' have been removed, including argo-cd", opts.envName)
+		log.G(ctx).Printf("all managed resources in '%s' have been removed, including argo-cd", opts.envName)
 	} else {
-		log.G(ctx).Printf("all Codefresh resources in '%s' have been removed, argo-cd and user Applications remain on cluster", opts.envName)
+		log.G(ctx).Printf("all managed resources in '%s' have been removed, argo-cd and user Applications remain on cluster", opts.envName)
 	}
 }
 
-func cloneExistingRepo(ctx context.Context, opts *options) (git.Repository, string) {
+func cloneExistingRepo(ctx context.Context, opts *options) {
 	p, err := git.NewProvider(&git.Options{
 		Type: "github", // only option for now
 		Auth: &git.Auth{
@@ -135,13 +135,11 @@ func cloneExistingRepo(ctx context.Context, opts *options) (git.Repository, stri
 	})
 	cferrors.CheckErr(err)
 
-	r, err := p.CloneRepository(ctx, opts.repoURL)
+	values.GitopsRepo, err = p.CloneRepository(ctx, opts.repoURL)
 	cferrors.CheckErr(err)
 
-	clonePath, err := r.Root()
+	values.GitopsRepoClonePath, err = values.GitopsRepo.Root()
 	cferrors.CheckErr(err)
-
-	return r, clonePath
 }
 
 func persistGitopsRepo(ctx context.Context, opts *options, msg string) {
