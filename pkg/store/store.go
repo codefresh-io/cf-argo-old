@@ -15,7 +15,7 @@ var (
 	binaryName = "cf-argo"
 	version    = "v99.99.99"
 	gitCommit  = ""
-	baseGitURL = "https://github.com/codefresh-io/argocd-template#repo_urls" //TODO: update to proper tag
+	baseGitURL = "https://github.com/codefresh-io/argocd-template#repo_urls"
 )
 
 type Version struct {
