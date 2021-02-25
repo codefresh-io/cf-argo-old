@@ -1,5 +1,17 @@
-# cf-argo
-codefresh argo cli
+# argo-installer
+
+## Overview:
+The installer utilizes the gitops pattern in order to control the install,uninstall and upgrade flows for kustomize based installations.
+The installer creates (or modifies) a git repository while leverging the Argo CD apps patttern.
+
+## Architecture:
+### Bootstrap:
+The installer clones the template repository, copies the templates into the target repository, and bootstrap Argo CD and sealed-secrets (controlled by bootstrap/kustomization.yaml in template repository) by applying the kustomized output to K8S cluster.
+### controlling the installation flow:
+The follwing folders and files in the user's repository contorls the installation's content :
+* `argocd-apps/{envName}/components` - contains Argo CD apps for `envName`
+* `kustomize/entities/overlays/{envName}/kustomization.yaml` - contains the entities that  are synced by Argo CD app for `envName`
+* `kustomize/components/{appName}/overlays/{envName}` - this folder contains the the overlays to control `appName` app
 
 ## Usage:
 
