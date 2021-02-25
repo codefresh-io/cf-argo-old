@@ -92,10 +92,18 @@ func (c *Config) AddEnvironmentP(ctx context.Context, env *Environment, values i
 		return err
 	}
 
-	manifests, err := kube.KustBuild(newEnv.bootstrapUrl(), values)
+	nsPath := filepath.Join(env.c.path, "bootstrap", "namespace.yaml")
+	nsData, err := os.ReadFile(nsPath)
 	if err != nil {
 		return err
 	}
+
+	kustData, err := kube.KustBuild(newEnv.bootstrapUrl(), values)
+	if err != nil {
+		return err
+	}
+
+	manifests := []byte(fmt.Sprintf("%s\n\n---\n%s", string(nsData), string(kustData)))
 
 	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
 		Manifests: manifests,
