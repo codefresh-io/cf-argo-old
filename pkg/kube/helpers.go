@@ -116,6 +116,7 @@ func (c *client) delete(ctx context.Context, opts *DeleteOptions) error {
 			}()
 
 			o.Filenames = []string{"-"}
+			o.IgnoreNotFound = true
 			o.WaitForDeletion = true
 			err := o.Complete(c, args, cmd)
 			if err != nil {
