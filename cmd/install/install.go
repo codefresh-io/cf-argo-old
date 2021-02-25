@@ -212,6 +212,8 @@ func initGitopsRepo(ctx context.Context, opts *options) {
 
 	conf := envman.NewConfig(values.GitopsRepoClonePath)
 	cferrors.CheckErr(conf.Persist())
+
+	log.G(ctx).WithField("path", values.GitopsRepoClonePath).Debug("Initialized Gitops repository")
 }
 
 func addInstallationToRepo(ctx context.Context, opts *options) {
