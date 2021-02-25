@@ -41,7 +41,9 @@ type (
 	Provider interface {
 		// CreateRepository creates the repository in the remote provider and returns a
 		// clone url
-		CreateRepository(ctx context.Context, opts *CreateRepositoryOptions) (string, error)
+		CreateRepository(ctx context.Context, opts *CreateRepoOptions) (string, error)
+
+		GetRepository(ctx context.Context, opts *GetRepoOptions) (string, error)
 
 		// CloneRepository tries to clone the repository and return it if it exists or
 		// ErrRepoNotFound if the repo does not exist
@@ -74,10 +76,15 @@ type (
 		Auth       *Auth
 	}
 
-	CreateRepositoryOptions struct {
+	CreateRepoOptions struct {
 		Owner   string
 		Name    string
 		Private bool
+	}
+
+	GetRepoOptions struct {
+		Owner string
+		Name  string
 	}
 
 	repo struct {

@@ -25,16 +25,15 @@ var (
 	ErrEnvironmentNotExist      = errors.New("environment does not exist")
 	ErrAppNotFound              = errors.New("app not found")
 
+	ConfigFileName = fmt.Sprintf("%s.yaml", store.AppName)
+
 	yamlSeparator = regexp.MustCompile(`\n---`)
 )
 
 const (
-	configVersion = "1.0"
-
-	configFileName  = "codefresh.yaml"
-	labelsCfName    = "cf-name"
-	labelsManagedBy = "ent-managed-by"
-	DefaultAppsPath = "argocd-apps"
+	configVersion   = "1.0"
+	labelsManagedBy = "app.kubernetes.io/managed-by"
+	labelsName      = "app.kubernetes.io/name"
 )
 
 type (
@@ -72,12 +71,12 @@ func (c *Config) Persist() error {
 		return err
 	}
 
-	return ioutil.WriteFile(filepath.Join(c.path, configFileName), data, 0644)
+	return ioutil.WriteFile(filepath.Join(c.path, ConfigFileName), data, 0644)
 }
 
 // AddEnvironmentP adds a new environment, copies all of the argocd apps to the relative
 // location in the repository that c is managing, and persists the config object
-func (c *Config) AddEnvironmentP(env *Environment) error {
+func (c *Config) AddEnvironmentP(ctx context.Context, env *Environment, values interface{}, dryRun bool) error {
 	if _, exists := c.Environments[env.name]; exists {
 		return fmt.Errorf("%w: %s", ErrEnvironmentAlreadyExists, env.name)
 	}
@@ -89,11 +88,23 @@ func (c *Config) AddEnvironmentP(env *Environment) error {
 	}
 
 	c.Environments[env.name] = newEnv
-	return c.Persist()
+	if err = c.Persist(); err != nil {
+		return err
+	}
+
+	manifests, err := kube.KustBuild(newEnv.bootstrapUrl(), values)
+	if err != nil {
+		return err
+	}
+
+	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
+		Manifests: manifests,
+		DryRun:    dryRun,
+	})
 }
 
 // DeleteEnvironmentP deletes an environment and persists the config object
-func (c *Config) DeleteEnvironmentP(name string) error {
+func (c *Config) DeleteEnvironmentP(ctx context.Context, name string, values interface{}, dryRun bool) error {
 	env, exists := c.Environments[name]
 	if !exists {
 		return ErrEnvironmentNotExist
@@ -105,7 +116,19 @@ func (c *Config) DeleteEnvironmentP(name string) error {
 	}
 
 	delete(c.Environments, name)
-	return c.Persist()
+	if err = c.Persist(); err != nil {
+		return err
+	}
+
+	manifests, err := kube.KustBuild(env.bootstrapUrl(), values)
+	if err != nil {
+		return err
+	}
+
+	return store.Get().NewKubeClient(ctx).Delete(ctx, &kube.DeleteOptions{
+		Manifests: manifests,
+		DryRun:    dryRun,
+	})
 }
 
 func (c *Config) FirstEnv() *Environment {
@@ -117,7 +140,7 @@ func (c *Config) FirstEnv() *Environment {
 
 // LoadConfig loads the config from the specified path
 func LoadConfig(path string) (*Config, error) {
-	data, err := ioutil.ReadFile(filepath.Join(path, configFileName))
+	data, err := ioutil.ReadFile(filepath.Join(path, ConfigFileName))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("config file does not exist: %s", path)
@@ -174,12 +197,12 @@ func (c *Config) installEnv(env *Environment) (*Environment, error) {
 	return newEnv, nil
 }
 
-func (c *Config) getAppByName(appName string) (*Application, error) {
+func (c *Config) getApp(appName string) (*Application, error) {
 	err := ErrAppNotFound
 	var app *Application
 
 	for _, e := range c.Environments {
-		app, err = e.getAppByName(appName)
+		app, err = e.GetApp(appName)
 		if err != nil && !errors.Is(err, ErrAppNotFound) {
 			return nil, err
 		}
@@ -190,30 +213,6 @@ func (c *Config) getAppByName(appName string) (*Application, error) {
 	}
 
 	return app, err
-}
-
-func (e *Environment) ApplyBootstrap(ctx context.Context, values interface{}, dryRun bool) error {
-	manifests, err := kube.KustBuild(e.bootstrapUrl(), values)
-	if err != nil {
-		return err
-	}
-
-	return store.Get().NewKubeClient(ctx).Apply(ctx, &kube.ApplyOptions{
-		Manifests: manifests,
-		DryRun:    dryRun,
-	})
-}
-
-func (e *Environment) DeleteBootstrap(ctx context.Context, values interface{}, dryRun bool) error {
-	manifests, err := kube.KustBuild(e.bootstrapUrl(), values)
-	if err != nil {
-		return err
-	}
-
-	return store.Get().NewKubeClient(ctx).Delete(ctx, &kube.DeleteOptions{
-		Manifests: manifests,
-		DryRun:    dryRun,
-	})
 }
 
 func (e *Environment) UpdateTemplateRef(templateRef string) {
@@ -231,7 +230,7 @@ func (e *Environment) bootstrapUrl() string {
 }
 
 func (e *Environment) cleanup() error {
-	rootApp, err := e.getRootApp()
+	rootApp, err := e.GetRootApp()
 	if err != nil {
 		return err
 	}
@@ -240,8 +239,8 @@ func (e *Environment) cleanup() error {
 }
 
 func (e *Environment) installApp(srcRootPath string, app *Application) error {
-	appName := app.cfName()
-	refApp, err := e.c.getAppByName(appName)
+	appName := app.labelName()
+	refApp, err := e.c.getApp(appName)
 	if err != nil {
 		if !errors.Is(err, ErrAppNotFound) {
 			return err
@@ -277,22 +276,24 @@ func (e *Environment) installNewApp(srcRootPath string, app *Application) error 
 	return helpers.CopyDir(absSrc, absDst)
 }
 
-func (e *Environment) Uninstall() (*Application, error) {
-	rootApp, err := e.getRootApp()
+// Uninstall removed all managed apps and returns true if there are no more
+// apps left in the environment.
+func (e *Environment) Uninstall() (bool, error) {
+	rootApp, err := e.GetRootApp()
 	if err != nil {
-		return rootApp, err
+		return false, err
 	}
 
 	uninstalled, err := rootApp.uninstall(e.c.path)
 	if uninstalled {
-		return rootApp, createDummy(filepath.Join(e.c.path, rootApp.srcPath()))
+		return true, createDummy(filepath.Join(e.c.path, rootApp.srcPath()))
 	}
 
-	return nil, err
+	return false, err
 }
 
 func (e *Environment) leafApps() ([]*Application, error) {
-	rootApp, err := e.getRootApp()
+	rootApp, err := e.GetRootApp()
 	if err != nil {
 		return nil, err
 	}
@@ -300,17 +301,17 @@ func (e *Environment) leafApps() ([]*Application, error) {
 	return rootApp.leafApps(e.c.path)
 }
 
-func (e *Environment) getRootApp() (*Application, error) {
+func (e *Environment) GetRootApp() (*Application, error) {
 	return getAppFromFile(filepath.Join(e.c.path, e.RootApplicationPath))
 }
 
-func (e *Environment) getAppByName(appName string) (*Application, error) {
-	rootApp, err := e.getRootApp()
+func (e *Environment) GetApp(appName string) (*Application, error) {
+	rootApp, err := e.GetRootApp()
 	if err != nil {
 		return nil, err
 	}
 
-	app, err := e.getAppByNameRecurse(rootApp, appName)
+	app, err := e.getAppRecurse(rootApp, appName)
 	if err != nil {
 		return nil, err
 	}
@@ -320,8 +321,8 @@ func (e *Environment) getAppByName(appName string) (*Application, error) {
 	return app, nil
 }
 
-func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*Application, error) {
-	if root.cfName() == appName {
+func (e *Environment) getAppRecurse(root *Application, appName string) (*Application, error) {
+	if root.labelName() == appName {
 		return root, nil
 	}
 
@@ -338,11 +339,11 @@ func (e *Environment) getAppByNameRecurse(root *Application, appName string) (*A
 			continue
 		}
 
-		if !app.isManagedByCf() {
+		if !app.isManaged() {
 			continue
 		}
 
-		res, err := e.getAppByNameRecurse(app, appName)
+		res, err := e.getAppRecurse(app, appName)
 		if err != nil || res != nil {
 			return res, err
 		}
@@ -409,12 +410,12 @@ func (a *Application) setSrcPath(newPath string) {
 	a.Spec.Source.Path = newPath
 }
 
-func (a *Application) cfName() string {
-	return a.labelValue(labelsCfName)
+func (a *Application) labelName() string {
+	return a.labelValue(labelsName)
 }
 
-func (a *Application) isManagedByCf() bool {
-	return a.labelValue(labelsManagedBy) == "codefresh.io"
+func (a *Application) isManaged() bool {
+	return a.labelValue(labelsManagedBy) == store.AppName
 }
 
 func (a *Application) labelValue(label string) string {
@@ -460,7 +461,7 @@ func (a *Application) leafApps(rootPath string) ([]*Application, error) {
 	res := []*Application{}
 	for _, childApp := range childApps {
 		isLeaf = false
-		if childApp.isManagedByCf() {
+		if childApp.isManaged() {
 			childRes, err := childApp.leafApps(rootPath)
 			if err != nil {
 				return nil, err
@@ -470,7 +471,7 @@ func (a *Application) leafApps(rootPath string) ([]*Application, error) {
 		}
 	}
 
-	if isLeaf && a.isManagedByCf() {
+	if isLeaf && a.isManaged() {
 		res = append(res, a)
 	}
 
@@ -486,7 +487,7 @@ func (a *Application) uninstall(rootPath string) (bool, error) {
 
 	totalUninstalled := 0
 	for _, childApp := range childApps {
-		if childApp.isManagedByCf() {
+		if childApp.isManaged() {
 			childUninstalled, err := childApp.uninstall(rootPath)
 			if err != nil {
 				return uninstalled, err

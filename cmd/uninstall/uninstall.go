@@ -100,28 +100,26 @@ func uninstall(ctx context.Context, opts *options) {
 		panic(envman.ErrEnvironmentNotExist)
 	}
 
-	rootApp, err := env.Uninstall()
+	shouldClean, err := env.Uninstall()
 	cferrors.CheckErr(err)
 
 	persistGitopsRepo(ctx, opts, fmt.Sprintf("uninstalled environment %s", opts.envName))
 
-	log.G(ctx).Printf("waiting for root application sync... (might take a few seconds)")
-	awaitSync(ctx, opts, rootApp)
+	if shouldClean {
+		rootApp, err := env.GetRootApp()
+		cferrors.CheckErr(err)
 
-	if rootApp != nil {
+		log.G(ctx).Printf("waiting for root application sync... (might take a few seconds)")
+		awaitSync(ctx, opts, rootApp)
+
 		log.G(ctx).Printf("deleting root application")
 		deleteArgocdApp(ctx, opts, rootApp)
 
-		log.G(ctx).Printf("cleaning up the repo")
-
-		cferrors.CheckErr(env.DeleteBootstrap(ctx, renderValues, opts.dryRun))
-		cferrors.CheckErr(conf.DeleteEnvironmentP(opts.envName))
+		log.G(ctx).Printf("cleaning up the repository")
+		cferrors.CheckErr(conf.DeleteEnvironmentP(ctx, opts.envName, renderValues, opts.dryRun))
 
 		persistGitopsRepo(ctx, opts, fmt.Sprintf("cleanup %s resources", opts.envName))
 
-		// generate bootstrap manifest ( - need to also fix install to render it from git, instead of local fs)
-		// render manifest in memory
-		// delete manifest from cluster
 		log.G(ctx).Printf("all Codefresh resources in '%s' have been removed, including argo-cd", opts.envName)
 	} else {
 		log.G(ctx).Printf("all Codefresh resources in '%s' have been removed, argo-cd and user Applications remain on cluster", opts.envName)

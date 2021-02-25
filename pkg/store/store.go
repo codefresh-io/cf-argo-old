@@ -11,10 +11,11 @@ import (
 var s Store
 
 var (
+	AppName    = "argo-installer"
 	binaryName = "cf-argo"
 	version    = "v99.99.99"
 	gitCommit  = ""
-	baseGitURL = "https://github.com/codefresh-io/argocd-template"
+	baseGitURL = "https://github.com/codefresh-io/argocd-template#repo_urls" //TODO: update to proper tag
 )
 
 type Version struct {

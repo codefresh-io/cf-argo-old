@@ -38,18 +38,18 @@ func (_m *Provider) CloneRepository(ctx context.Context, cloneURL string) (git.R
 }
 
 // CreateRepository provides a mock function with given fields: ctx, opts
-func (_m *Provider) CreateRepository(ctx context.Context, opts *git.CreateRepositoryOptions) (string, error) {
+func (_m *Provider) CreateRepository(ctx context.Context, opts *git.CreateRepoOptions) (string, error) {
 	ret := _m.Called(ctx, opts)
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func(context.Context, *git.CreateRepositoryOptions) string); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *git.CreateRepoOptions) string); ok {
 		r0 = rf(ctx, opts)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *git.CreateRepositoryOptions) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *git.CreateRepoOptions) error); ok {
 		r1 = rf(ctx, opts)
 	} else {
 		r1 = ret.Error(1)
