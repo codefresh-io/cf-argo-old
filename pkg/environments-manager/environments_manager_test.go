@@ -191,7 +191,6 @@ spec:
 }
 
 func TestApplication_childApps(t *testing.T) {
-
 	must := func(path string, err error) string {
 		assert.NoError(t, err)
 		return path
@@ -213,10 +212,39 @@ func TestApplication_childApps(t *testing.T) {
 				{
 					&v1alpha1.Application{
 						ObjectMeta: metav1.ObjectMeta{
-							Name: "child",
+							Name: "leaf",
 						},
 					},
 					must(filepath.Abs("../../test/e2e/structures/uc1/apps/app1.yaml")),
+					nil,
+				},
+			},
+			"",
+		},
+		"Two levels": {
+			&Environment{
+				c: &Config{
+					path: must(filepath.Abs("../../test/e2e/structures/uc2")),
+				},
+				RootApplicationPath: "root.yaml",
+			},
+			[]*Application{
+				{
+					&v1alpha1.Application{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "child1",
+						},
+					},
+					must(filepath.Abs("../../test/e2e/structures/uc2/apps/app1.yaml")),
+					nil,
+				},
+				{
+					&v1alpha1.Application{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "leaf2",
+						},
+					},
+					must(filepath.Abs("../../test/e2e/structures/uc2/apps/app2.yaml")),
 					nil,
 				},
 			},

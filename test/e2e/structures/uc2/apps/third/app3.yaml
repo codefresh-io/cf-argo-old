@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: leaf
+  name: leaf1
 spec:
   source:
     repoURL: https://github.com/foo/bar

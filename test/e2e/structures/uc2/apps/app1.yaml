@@ -1,12 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: leaf
+  name: child1
 spec:
   source:
     repoURL: https://github.com/foo/bar
     targetRevision: HEAD
-    path: no-apps
+    path: apps/third
   destination:
     server: https://kubernetes.default.svc
     namespace: "foo"
