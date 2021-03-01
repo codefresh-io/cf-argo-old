@@ -268,7 +268,7 @@ func (e *Environment) cleanup() error {
 		return err
 	}
 
-	return rootApp.deleteFromFilesystem(e.c.path)
+	return rootApp.deleteFromFilesystem()
 }
 
 func (e *Environment) installApp(srcRootPath string, app *Application) error {
@@ -282,7 +282,7 @@ func (e *Environment) installApp(srcRootPath string, app *Application) error {
 		return e.installNewApp(srcRootPath, app)
 	}
 
-	baseLocation, err := refApp.getBaseLocation(e.c.path)
+	baseLocation, err := refApp.getBaseLocation()
 	if err != nil {
 		return err
 	}
@@ -317,7 +317,7 @@ func (e *Environment) Uninstall() (bool, error) {
 		return false, err
 	}
 
-	uninstalled, err := rootApp.uninstall(e.c.path)
+	uninstalled, err := rootApp.uninstall()
 	if uninstalled {
 		return true, createDummy(filepath.Join(e.c.path, rootApp.srcPath()))
 	}
@@ -414,8 +414,8 @@ func (e *Environment) getAppFromFile(path string) (*Application, error) {
 	return nil, nil
 }
 
-func (a *Application) deleteFromFilesystem(rootPath string) error {
-	srcDir := filepath.Join(rootPath, a.srcPath())
+func (a *Application) deleteFromFilesystem() error {
+	srcDir := filepath.Join(a.env.c.path, a.srcPath())
 	err := os.RemoveAll(srcDir)
 	if err != nil {
 		return err
@@ -459,8 +459,8 @@ func (a *Application) labelValue(label string) string {
 	return a.Labels[label]
 }
 
-func (a *Application) getBaseLocation(absRoot string) (string, error) {
-	refKust := filepath.Join(absRoot, a.srcPath(), "kustomization.yaml")
+func (a *Application) getBaseLocation() (string, error) {
+	refKust := filepath.Join(a.env.c.path, a.srcPath(), "kustomization.yaml")
 	bytes, err := ioutil.ReadFile(refKust)
 	if err != nil {
 		return "", err
@@ -509,7 +509,7 @@ func (a *Application) leafApps() ([]*Application, error) {
 	return res, nil
 }
 
-func (a *Application) uninstall(rootPath string) (bool, error) {
+func (a *Application) uninstall() (bool, error) {
 	uninstalled := false
 	childApps, err := a.childApps()
 	if err != nil {
@@ -519,7 +519,7 @@ func (a *Application) uninstall(rootPath string) (bool, error) {
 	totalUninstalled := 0
 	for _, childApp := range childApps {
 		if childApp.isManaged() {
-			childUninstalled, err := childApp.uninstall(rootPath)
+			childUninstalled, err := childApp.uninstall()
 			if err != nil {
 				return uninstalled, err
 			}
