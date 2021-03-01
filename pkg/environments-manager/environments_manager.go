@@ -195,8 +195,10 @@ func (c *Config) installEnv(env *Environment) (*Environment, error) {
 		RootApplicationPath: env.RootApplicationPath,
 	}
 	for _, la := range lapps {
-		if err = newEnv.installApp(env.c.path, la); err != nil {
-			return nil, err
+		if la.isManaged() {
+			if err = newEnv.installApp(env.c.path, la); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -492,17 +494,15 @@ func (a *Application) leafApps() ([]*Application, error) {
 	res := []*Application{}
 	for _, childApp := range childApps {
 		isLeaf = false
-		if childApp.isManaged() {
-			childRes, err := childApp.leafApps()
-			if err != nil {
-				return nil, err
-			}
-
-			res = append(res, childRes...)
+		childRes, err := childApp.leafApps()
+		if err != nil {
+			return nil, err
 		}
+
+		res = append(res, childRes...)
 	}
 
-	if isLeaf && a.isManaged() {
+	if isLeaf {
 		res = append(res, a)
 	}
 

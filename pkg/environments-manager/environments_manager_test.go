@@ -276,3 +276,90 @@ func TestApplication_childApps(t *testing.T) {
 		})
 	}
 }
+
+func TestApplication_leafApps(t *testing.T) {
+	must := func(path string, err error) string {
+		assert.NoError(t, err)
+		return path
+	}
+
+	tests := map[string]struct {
+		env  *Environment
+		want []*Application
+		err  string
+	}{
+		"Simple": {
+			&Environment{
+				c: &Config{
+					path: must(filepath.Abs("../../test/e2e/structures/uc1")),
+				},
+				RootApplicationPath: "root.yaml",
+			},
+			[]*Application{
+				{
+					&v1alpha1.Application{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "leaf",
+						},
+					},
+					must(filepath.Abs("../../test/e2e/structures/uc1/apps/app1.yaml")),
+					nil,
+				},
+			},
+			"",
+		},
+		"Two levels": {
+			&Environment{
+				c: &Config{
+					path: must(filepath.Abs("../../test/e2e/structures/uc2")),
+				},
+				RootApplicationPath: "root.yaml",
+			},
+			[]*Application{
+				{
+					&v1alpha1.Application{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "leaf1",
+						},
+					},
+					must(filepath.Abs("../../test/e2e/structures/uc2/apps/third/app3.yaml")),
+					nil,
+				},
+				{
+					&v1alpha1.Application{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "leaf2",
+						},
+					},
+					must(filepath.Abs("../../test/e2e/structures/uc2/apps/app2.yaml")),
+					nil,
+				},
+			},
+			"",
+		},
+	}
+
+	for tname, tt := range tests {
+		t.Run(tname, func(t *testing.T) {
+			app, err := tt.env.GetRootApp()
+			if tt.err != "" {
+				assert.Contains(t, err.Error(), tt.err)
+				return
+			}
+			assert.NoError(t, err)
+
+			got, err := app.leafApps()
+			if tt.err != "" {
+				assert.Contains(t, err.Error(), tt.err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, len(tt.want), len(got))
+			for i, ca := range got {
+				assert.Equal(t, tt.want[i].Path, ca.Path)
+				assert.Equal(t, tt.want[i].Name, ca.Name)
+			}
+		})
+	}
+}
