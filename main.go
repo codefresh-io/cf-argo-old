@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"syscall"
-
 	"github.com/codefresh-io/cf-argo/cmd/root"
 	"github.com/codefresh-io/cf-argo/pkg/helpers"
 	"github.com/codefresh-io/cf-argo/pkg/log"
